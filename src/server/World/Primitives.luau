@@ -11,7 +11,7 @@ function Primitives.part(parent: Instance, name: string, size: Vector3, frame: C
 	return part
 end
 
-function Primitives.sign(parent: Instance, text: string, frame: CFrame, size: Vector3, color: Color3): Part
+function Primitives.sign(parent: Instance, text: string, frame: CFrame, size: Vector3, color: Color3, doubleSided: boolean?): Part
 	local part = Primitives.part(parent, "Sign", size, frame, Color3.fromRGB(17, 25, 44))
 	local surface = Instance.new("SurfaceGui")
 	surface.Face, surface.PixelsPerStud = Enum.NormalId.Front, 36
@@ -22,6 +22,10 @@ function Primitives.sign(parent: Instance, text: string, frame: CFrame, size: Ve
 	label.Text, label.TextColor3, label.TextScaled = text, color, true
 	label.Font = Enum.Font.GothamBold
 	label.Parent = surface
+	if doubleSided then
+		local back = surface:Clone()
+		back.Face, back.Parent = Enum.NormalId.Back, part
+	end
 	return part
 end
 

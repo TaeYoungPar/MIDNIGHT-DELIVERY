@@ -57,6 +57,12 @@ function RoundModel.tick(self: Model, now: number, userIds: { number }): boolean
 	return true
 end
 
+function RoundModel.finish(self: Model, now: number, result: string)
+	if self.phase ~= "PLAYING" then return end
+	self.orderActive, self.phase, self.result = false, "RESULTS", result
+	self.endsAt = now + self.settings.Results
+end
+
 function RoundModel.complete(self: Model, userId: number, expectedRound: number, now: number): { number }?
 	if self.phase ~= "PLAYING" or not self.orderActive or expectedRound ~= self.roundId
 		or not self.participants[userId] or now >= self.endsAt then return nil end

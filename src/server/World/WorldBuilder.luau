@@ -4,6 +4,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local P = require(script.Parent.Primitives)
 local Building = require(script.Parent.BuildingFactory)
+local Navigation = require(script.Parent.NavigationSigns)
+local Catalog = require(ReplicatedStorage.Shared.OrderCatalog)
 local WorldBuilder = {}
 local cyan = Color3.fromRGB(99, 216, 232)
 
@@ -35,19 +37,28 @@ function WorldBuilder.build()
 			P.part(roads, "CenterMark", Vector3.new(9, 0.05, 0.5), CFrame.new(x, 0.26, -20), Color3.fromRGB(255, 213, 137))
 		end
 		Building.headquarters(folders.Lobby, Config.Map.Headquarters)
-		local house, door = Building.house(folders.Buildings, "ghost_house", Config.Map.GhostHouse, cyan)
-		house:SetAttribute("CustomerType", "NormalP1")
-		local marker = Instance.new("Attachment")
-		marker.Name, marker.Position, marker.Parent = "InteractPoint", Vector3.new(0, 0, -3), door
-		local prompt = Instance.new("ProximityPrompt")
-		prompt.Name, prompt.ActionText, prompt.ObjectText = "Deliver", "야식 배달", "01 · 파란 지붕집"
-		prompt.HoldDuration, prompt.MaxActivationDistance = 0.6, Config.Delivery.Distance
-		prompt.RequiresLineOfSight, prompt.Enabled = true, false
-		prompt.Parent = marker
-		Building.house(folders.Buildings, "giant_house", Config.Map.GiantHouse, Color3.fromRGB(255, 170, 69))
-		for i = 1, 3 do
-			Building.house(folders.Buildings, "future_house_" .. i, Vector3.new(-90 + i * 55, 0, 255), Color3.fromRGB(170, 139, 255))
+		local destinations = {}
+		local function destination(id, position, color, style)
+			local house, door = Building.house(folders.Buildings, id, position, color, style)
+			house:SetAttribute("CustomerType", if id == "ghost_house" then "Ghost" elseif id == "giant_house" then "Giant" else "Fake")
+			local marker = Instance.new("Attachment")
+			marker.Name, marker.Position, marker.Parent = "InteractPoint", Vector3.new(0, 0, -3), door
+			local prompt = Instance.new("ProximityPrompt")
+			prompt.Name, prompt.ActionText, prompt.ObjectText = "Deliver", "야식 배달", style and style.label or id
+			prompt.HoldDuration, prompt.MaxActivationDistance = 0.6, Config.Delivery.Distance
+			prompt.RequiresLineOfSight, prompt.Enabled, prompt.Parent = true, false, marker
+			destinations[id] = { prompt = prompt, target = door.CFrame:PointToWorldSpace(marker.Position), door = door }
 		end
+		destination("ghost_house", Config.Map.GhostHouse, Color3.fromRGB(63, 112, 228), { label = "01 · 파란 지붕집" })
+		destination("giant_house", Config.Map.GiantHouse, Color3.fromRGB(255, 170, 69), { label = "02 · 거인의 집" })
+		for i, info in Catalog.FakeHouses do
+			destination(info.id, Vector3.new(-90 + i * 55, 0, 255), Color3.fromRGB(170, 139, 255), {
+				label = info.label, symbol = info.symbol,
+				mailboxColor = Color3.fromRGB(table.unpack(info.mailbox)), lampColor = Color3.fromRGB(table.unpack(info.lamp)),
+			})
+		end
+		P.part(roads, "GiantRoad", Vector3.new(200, 0.2, 30), CFrame.new(100, 0.12, 120), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
+		P.part(roads, "OuterRoad", Vector3.new(180, 0.2, 30), CFrame.new(20, 0.12, 230), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
 		local spawn = Instance.new("SpawnLocation")
 		spawn.Name, spawn.Size, spawn.CFrame = "LobbySpawn", Vector3.new(16, 1, 10), CFrame.new(Config.Map.Spawn)
 		spawn.Anchored, spawn.Neutral, spawn.Duration = true, true, 3
@@ -60,7 +71,7 @@ function WorldBuilder.build()
 			local light = Instance.new("PointLight")
 			light.Brightness, light.Range, light.Color, light.Parent = 1.2, 32, lamp.Color, lamp
 		end
-		P.sign(roads, "← 01 파란 지붕집", CFrame.new(17, 9, -43), Vector3.new(23, 5, 1), cyan)
+		Navigation.create(roads, "BlueHouseGuide", Vector3.new(0, 0.5, -20), destinations.ghost_house.target, cyan)
 		local random = Random.new(Config.Map.Seed)
 		for i = 1, 55 do
 			local x, z = random:NextNumber(-300, -245), random:NextNumber(-250, 290)
@@ -70,7 +81,8 @@ function WorldBuilder.build()
 			local crown = P.part(folders.Trees, "Canopy", Vector3.new(16, 18, 16), CFrame.new(x, h, z), Color3.fromRGB(31, 65, 60))
 			crown.Shape, crown.CanCollide = Enum.PartType.Ball, false
 		end
-		return { world = world, spawn = spawn, prompt = prompt, target = door.CFrame:PointToWorldSpace(marker.Position) }
+		return { world = world, spawn = spawn, destinations = destinations, fakeCenter = Vector3.new(20, 6, 235),
+			prompt = destinations.ghost_house.prompt, target = destinations.ghost_house.target }
 	end)
 	if not ok then
 		world:Destroy()

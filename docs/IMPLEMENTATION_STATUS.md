@@ -1,36 +1,31 @@
-# 구현 현황
+# 구현 현황 · 2026-10-29 (한국 시간)
 
-기록: 2026-10-28 (한국 시간). 원본 설계서와 기술 명세 전체를 검토했습니다.
+## 사용자 실행 피드백
 
-## P0 — 코드/빌드 구현, Studio 통과 대기
+이전 P1 ZIP에 대해 사용자가 Studio에서 기본 동작이 되며 파란 지붕집 표지판이 잘못되었다고 보고했습니다. 배달·결과 흐름에 대한 사용자 실행 피드백이며 모바일/4인/전체 Output QA 통과를 의미하지 않습니다.
 
-- `default.project.json`: Shared / Server / Client 매핑.
-- `src/server/Bootstrap.server.luau`, `src/client/Bootstrap.client.luau`: 초기화, 명시적 성공/실패 로그, 초기 스냅샷과 GUI.
-- `src/server/World/{WorldBuilder,BuildingFactory,Primitives}.luau`: 코드 생성 네온 야간 마을, 본부, 스폰, 현관, 표지판, 숲, 외곽 주택.
-- 소유권 Attribute가 있는 GameWorld만 교체. 새 생성 실패 시 기존 월드 보존. 모르는 GameWorld는 오류로 중단.
-- `tools/setup.sh`, `tools/verify.sh`, README: 고정 도구 버전과 실행/검증 방법.
-- 직접 검증: Rojo Place 빌드, Luau 컴파일, 데이터 모델에서 264개 하위 인스턴스 생성/반복 생성/사용자 월드 보호.
-- **미검증:** 실제 Studio Play의 서버·클라이언트 실행/Output/화면/이동. P0 최종 완료로 판정하지 않음.
+## 안내판 수정
 
-## P1 — 수직 슬라이스 코드 구현, Studio 통과 대기
+- `World/NavigationSigns.luau`: 고정된 ← 문자 대신 목적지 좌표를 바라보는 3D 화살표. 문자판은 양면으로 표시.
+- `WorldBuilder.luau`: 파란 지붕집 지붕을 실제 파란색으로 맞춤. 안내판/프롬프트/HUD 목표가 같은 목적지 데이터를 사용.
+- 자동 월드 검사에서 화살표와 목적지 방향 내적 > 0.99, 양면 글자판, 파란 지붕, 5개 프롬프트를 확인.
 
-- `Services/RoundModel.luau`: 20/10/420/15초 상태 전환, 참가 고정, 중도 이탈, 타임아웃, 다음 라운드.
-- `Services/RoundService.luau`: 엔진 이벤트·스냅샷·프롬프트 연결. 서버에서 주문 닫기 후 재화 지급.
-- `Services/EconomyService.luau`: 라운드/유저 키 중복 지급 방지, 세션 Coins/XP.
-- `Services/SecurityService.luau`: 거리·생존·기본 이동 이상·스냅샷 빈도·상호작용 쿨다운 검사.
-- `client/Controllers/HUDController.luau`, `client/UI/*`: 서버 타이머, 주문, 결과, 목표 방향과 거리, 화면 폭 적응·접기 버튼.
-- 직접 검증: 라운드/경제/보안 14개 테스트 PASS. 20라운드 테스트는 순수 모델 반복이며 실제 20판 게임 QA가 아님.
-- **미검증:** 실제 PC/모바일 배달, 터치 입력/세이프 영역/목표 화살표, 2·4인 서버 복제·동시 프롬프트. P1 완료로 판정하지 않음.
+## P0/P1 기반 유지
 
-## P2~P6 — 미착수
+Rojo 매핑, 서버/클라이언트 Bootstrap, 자동 생성 월드, 서버 타이머, 참가자 확정/중도 합류 대기, 세션 재화, HUD/결과/다음 라운드 구현. 원본 8개 설계 문서는 보존.
 
-괴물 규칙, 3건 주문, AI/구조, 스쿠터, 달리기, 영구 저장/상점/꾸미기, 접근성 옵션, 실기기 성능, 출시/게시 QA 미구현.
+## P2 — 주문 규칙 코드 구현, Studio 검증 대기
 
-다음 순서: docs/TESTING.md의 P0/P1 Studio 검증 → 실패 수정 → P2. Studio 통과 조건을 자동 모델 테스트로 대체하지 않습니다.
+- `Services/OrderPlanner.luau`: 매 라운드 고객 3종 배정, 시작 고객/가짜 집 정답 순환. 첫 판은 유령→거인→가짜 집.
+- `Services/OrderModel.luau`: 순수 상태 머신. 주문 120초, 유령 노크/방향 유지, 거인 90초/진정, 가짜 집 오배송/잠금/실패, 순차 진행/부분 성공.
+- `Services/RoundService.luau`: 실제 프롬프트 5개 연결, 서버 거리/생존/참가/시간/방향 재검증. 거인 홀드 시작부터 서버 경과 시간과 근접 유지 검사.
+- `EconomyService.luau`: round+order+user 단위 지급, 3건 성공 시 별도 보너스 키. 전부 성공하면 360 Coins / 60 XP.
+- `OrderCatalog.luau` / `BuildingFactory.luau`: 3개 우편함 색·표식/현관등과 주문 단서 공유. 거인 큰 문, 구역 도로 추가.
+- HUD: 배달 x/3, 고객별 조건, 노크/정면 유지/잠금/주문 남은 시간, 성공/실패 결과.
+- 직접 검사: 기존 14개 + P2 9개 테스트, 실제 RoundService mock 통합 흐름, 월드 데이터 모델, 컴파일, 핵심 모델 타입 검사, Rojo 패키징 PASS.
 
-## 2026-10-29 — 다운로드 전달 보완
+P2 전체 완료로 표시하지 않습니다. 추격은 P3의 AI/기절/구조와 함께 구현해야 하며 현재 규칙 위반은 자막/재시도 잠금으로 표시합니다. 실제 P2 Studio/모바일/멀티 실행은 미검증입니다.
 
-- `tools/package.py`: 검증된 Place와 한글 실행 방법을 ZIP으로 패키징.
-- `downloads/MidnightDelivery-Studio.zip`: Rojo 설치 없이 Studio에서 열 수 있는 P0/P1 개발 빌드.
-- 작업공간 내부 경로를 사용자용 다운로드로 안내한 문제를 GitHub 다운로드 경로로 보완.
-- 게임 기능 변경 없음. Studio 검증 대기 상태 유지.
+## P3~P6 — 남은 작업
+
+AI 추격/괴물 모델, 기절·구조, 차량·스프린트·낙하 복구, 영구 저장/레벨/상점/꾸미기, 접근성/사운드/모바일 성능, 전체 출시 QA. 다음은 P2 Studio 검증 및 P3 추격·복구 연결입니다.

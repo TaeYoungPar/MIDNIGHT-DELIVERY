@@ -42,6 +42,20 @@ local first = builder.build()
 assert(first.spawn.ClassName == "SpawnLocation" and first.spawn.Neutral)
 assert(not first.prompt.Enabled and math.abs(first.prompt.HoldDuration - 0.6) < 0.001)
 assert((first.target - r.Vector3.new(-105, 6, -1.5)).Magnitude < 0.001)
+local nav = first.world.Roads.BlueHouseGuide
+local wanted = first.target - nav.ArrowShaft.CFrame.Position
+local flat = r.Vector3.new(wanted.X, 0, wanted.Z).Unit
+assert(nav.ArrowShaft.CFrame.LookVector:Dot(flat) > 0.99, "3D arrow must point to the actual blue house")
+local faces = 0
+for _, item in nav:GetDescendants() do if item.ClassName == "SurfaceGui" then faces += 1 end end
+assert(faces == 2, "Navigation sign must be readable on both sides")
+assert(first.world.Buildings.ghost_house.Roof.Color.B > first.world.Buildings.ghost_house.Roof.Color.G)
+local promptCount = 0
+for _, destination in first.destinations do
+	promptCount += 1
+	assert(not destination.prompt.Enabled)
+end
+assert(promptCount == 5, "Ghost, giant, and three fake houses must have independent prompts")
 local count = #first.world:GetDescendants()
 for _, instance in first.world:GetDescendants() do
 	if instance:IsA("BasePart") then assert(instance.Anchored, instance.Name) end

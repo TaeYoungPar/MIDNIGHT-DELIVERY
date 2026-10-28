@@ -3,7 +3,7 @@
 local Economy = {}
 Economy.__index = Economy
 type Profile = { coins: number, xp: number }
-type State = { profiles: { [number]: Profile }, paid: { [number]: boolean }, roundId: number }
+type State = { profiles: { [number]: Profile }, paid: { [string]: boolean }, roundId: number }
 type Service = typeof(setmetatable({} :: State, Economy))
 
 function Economy.new(): Service
@@ -22,12 +22,13 @@ function Economy.remove(self: Service, player: any)
 	self.profiles[player.UserId] = nil
 end
 
-function Economy.award(self: Service, player: any, roundId: number, coins: number, xp: number): boolean
+function Economy.award(self: Service, player: any, roundId: number, coins: number, xp: number, orderId: number?): boolean
 	if roundId < self.roundId then return false end
 	if roundId > self.roundId then self.roundId = roundId; table.clear(self.paid) end
 	local id = player.UserId
-	if self.paid[id] or not self.profiles[id] then return false end
-	self.paid[id] = true
+	local key = tostring(orderId or 1) .. ":" .. tostring(id)
+	if self.paid[key] or not self.profiles[id] then return false end
+	self.paid[key] = true
 	local profile = self.profiles[id]
 	profile.coins += coins
 	profile.xp += xp

@@ -19,11 +19,11 @@ function HUD.start()
 		ui.stats.Text = string.format("%d Coins  ·  %d XP  ·  팀 %d/4", state.coins, state.xp, state.playerCount)
 		if state.phase == "RESULTS" then
 			ui.title.Text = state.result
-			ui.hint.Text = string.format("이번 라운드 +%d Coins\n15초 후 다음 배달을 준비합니다.", state.reward)
+			ui.hint.Text = string.format("성공 %d / 실패 %d · +%d Coins\n잠시 후 다음 배달을 준비합니다.", state.successes, state.failures, state.reward)
 		elseif not state.participant and state.phase ~= "WAITING" then
 			ui.title.Text, ui.hint.Text = "로비 대기", Strings.Spectator
 		elseif state.phase == "PLAYING" or state.phase == "PREPARING" then
-			ui.title.Text, ui.hint.Text = Strings.OrderTitle, Strings.OrderHint
+			ui.title.Text, ui.hint.Text = state.orderTitle, state.orderHint
 		else
 			ui.title.Text, ui.hint.Text = Strings.Title, "자동으로 시작합니다.\n주문 확인 → 네온 길 따라 이동 → 현관 배달"
 		end
@@ -43,6 +43,16 @@ function HUD.start()
 		local now = workspace:GetServerTimeNow()
 		if now > toastUntil then ui.toast.Text = "" end
 		if not state then return end
+		if state.phase == "PLAYING" and state.participant then
+			local detail = state.orderHint
+			if state.stage == "HOLDING" then detail = string.format("문을 향한 채 그대로! %d초", math.max(0, math.ceil(state.holdUntil - now)))
+			elseif state.stage == "COOLDOWN" then detail = string.format("규칙 위반 · %d초 후 재시도", math.max(0, math.ceil(state.cooldownUntil - now)))
+			elseif state.late then detail = "음식이 식었습니다 · 현관에서 3초간 진정시키기"
+			elseif state.hotUntil > 0 then detail = string.format("음식 온도 %d%% · 식기 전에 현관으로!", math.clamp(math.ceil((state.hotUntil - now) / 90 * 100), 0, 100))
+			elseif string.find(state.orderTitle, "유령") then detail = string.format("노크 %d/3 · 세 번째 노크 후 4초 정면 유지", state.knocks) end
+			ui.hint.Text = detail .. string.format("\n주문 남은 시간 %d초", math.max(0, math.ceil(state.orderEndsAt - now)))
+			ui.phase.Text = string.format("배달 %d/3 · 성공 %d", state.orderIndex, state.successes)
+		end
 		local seconds = math.max(0, math.ceil(state.endsAt - now))
 		ui.timer.Text = if state.endsAt == 0 then "대기" else string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -66,7 +76,7 @@ function HUD.start()
 		point = Vector2.new(math.clamp(point.X, 32, center.X * 2 - 32), math.clamp(point.Y, 84, center.Y * 2 - 50))
 		ui.arrow.Position, ui.arrow.Rotation = UDim2.fromOffset(point.X, point.Y), math.deg(math.atan2(unit.Y, unit.X)) + 90
 		ui.distance.Position = UDim2.fromOffset(math.clamp(point.X, 105, math.max(105, center.X * 2 - 105)), point.Y + 22)
-		ui.distance.Text = string.format("01 · %d studs", math.floor((root.Position - target).Magnitude))
+		ui.distance.Text = string.format("목적지 · %d studs", math.floor((root.Position - target).Magnitude))
 	end))
 	ui.arrow.Visible, ui.distance.Visible = false, false
 	return {

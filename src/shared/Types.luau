@@ -4,5 +4,8 @@ export type Snapshot = {
 	version: number, phase: Phase, roundId: number, endsAt: number,
 	participant: boolean, playerCount: number, coins: number, xp: number,
 	result: string, reward: number, orderActive: boolean, target: Vector3?,
+	orderIndex: number, orderTitle: string, orderHint: string, orderEndsAt: number,
+	stage: string, knocks: number, holdUntil: number, cooldownUntil: number,
+	hotUntil: number, late: boolean, successes: number, failures: number,
 }
 return {}
