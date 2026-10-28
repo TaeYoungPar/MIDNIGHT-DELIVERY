@@ -1,0 +1,30 @@
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Names = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RemoteNames"))
+local HUD = require(script.Parent.Controllers.HUDController)
+local hud = HUD.start()
+local folder = ReplicatedStorage:WaitForChild(Names.Folder, 30)
+if not folder then
+	hud.feedback("서버 초기화 실패 · Studio Output을 확인하세요")
+	error("MidnightDelivery: Remotes unavailable after 30 seconds")
+end
+local stateRemote = folder:WaitForChild(Names.State)
+local feedbackRemote = folder:WaitForChild(Names.Feedback)
+local snapshotRemote = folder:WaitForChild(Names.Snapshot)
+local stateConnection = stateRemote.OnClientEvent:Connect(hud.update)
+local feedbackConnection = feedbackRemote.OnClientEvent:Connect(hud.feedback)
+-- 이벤트를 먼저 구독하여 초기 스냅샷 도중 발생한 상태 전환을 놓치지 않는다.
+task.spawn(function()
+	for attempt = 1, 3 do
+		local ok, snapshot = pcall(function() return snapshotRemote:InvokeServer() end)
+		if ok and snapshot then hud.update(snapshot); return end
+		task.wait(1.1)
+	end
+	hud.feedback("상태 동기화 실패 · 다시 입장하세요")
+end)
+script.Destroying:Connect(function()
+	stateConnection:Disconnect()
+	feedbackConnection:Disconnect()
+	hud.destroy()
+end)
+print("[MidnightDelivery] Client GUI ready (P0/P1)")
