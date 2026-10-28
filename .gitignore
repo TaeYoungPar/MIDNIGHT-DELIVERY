@@ -5,3 +5,5 @@ build/
 *.rbxmx
 sourcemap.json
 .DS_Store
+# The direct Studio download is intentionally versioned.
+!downloads/MidnightDelivery.rbxlx

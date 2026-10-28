@@ -9,24 +9,37 @@ local OrderModel = require(script.Parent.OrderModel)
 local Planner = require(script.Parent.OrderPlanner)
 local Security = require(script.Parent.SecurityService)
 local Economy = require(script.Parent.EconomyService)
+local PlayerStates = require(script.Parent.PlayerStateService)
+local Monsters = require(script.Parent.MonsterService)
 local RoundService = {}
 type Destination = { prompt: ProximityPrompt, target: Vector3, door: Part }
 type World = { world: Folder, spawn: SpawnLocation, destinations: { [string]: Destination }, fakeCenter: Vector3 }
 type Remotes = { State: RemoteEvent, Feedback: RemoteEvent, Snapshot: RemoteFunction }
 
-function RoundService.start(world: World, remotes: Remotes)
+function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local model = RoundModel.new(Config.Round)
 	local orders: OrderModel.Model? = nil
 	local security, economy = Security.new(), Economy.new()
+	local playerStates, monsters
 	local version, elapsed = 0, 0
 	local connections = {}
 	local holds: { [Player]: { index: number, destination: string, began: number } } = {}
 	local function now() return workspace:GetServerTimeNow() end
 	local function snapshot(player: Player)
 		local spec = orders and orders:current()
+		local members = {}
+		for _, member in Players:GetPlayers() do
+			if model.participants[member.UserId] then
+				local status = if playerStates then playerStates:status(member) else { downUntil = 0, protectedUntil = 0 }
+				table.insert(members, { name = member.DisplayName, downUntil = status.downUntil })
+			end
+		end
+		local status = if playerStates then playerStates:status(player) else { downUntil = 0, protectedUntil = 0 }
 		local target = if spec and spec.kind == "Fake" then world.fakeCenter
 			elseif spec then world.destinations[spec.destination].target else nil
 		return {
+			downUntil = status.downUntil, protectedUntil = status.protectedUntil, members = members,
+			chase = if monsters then monsters:status() else { kind = "", endsAt = 0, targetId = 0 },
 			version = version, phase = model.phase, roundId = model.roundId, endsAt = model.endsAt,
 			participant = model.participants[player.UserId] == true, playerCount = #Players:GetPlayers(),
 			coins = player:GetAttribute("Coins") or 0, xp = player:GetAttribute("XP") or 0,
@@ -54,6 +67,15 @@ function RoundService.start(world: World, remotes: Remotes)
 		end
 		for _, player in Players:GetPlayers() do remotes.State:FireClient(player, snapshot(player)) end
 	end
+	local function participant(player)
+		return model.phase == "PLAYING" and model.participants[player.UserId] == true
+	end
+	playerStates = if dependencies and dependencies.playerStates then dependencies.playerStates else PlayerStates.new(world.spawn, participant, publish)
+	monsters = if dependencies and dependencies.monsters then dependencies.monsters else Monsters.new(world.world:FindFirstChild("NPCs"), playerStates, publish)
+	local function chase(kind, player, destinationId)
+		local destination = world.destinations[destinationId]
+		if destination and player then monsters:start(kind, player, destination.target + Vector3.new(0, 0, -10)) end
+	end
 	local function feedback(message: string)
 		for _, player in Players:GetPlayers() do remotes.Feedback:FireClient(player, message) end
 	end
@@ -69,10 +91,12 @@ function RoundService.start(world: World, remotes: Remotes)
 		if not orders then return end
 		local result = orders:takeOutcome()
 		if not result then return end
+		monsters:stop()
 		if result.success then award(result.reward, result.index) end
 		feedback(result.reason .. (if result.success then " · +" .. result.reward .. " Coins" else " · 다음 주문으로 진행"))
 		table.clear(holds)
 		if not orders:advance(now()) then
+			playerStates:clearRound()
 			if orders.successes == 3 then award(120, 4) end
 			model:finish(now(), string.format("배달 %d/3 성공 · %d건 실패", orders.successes, orders.failures))
 		end
@@ -80,14 +104,13 @@ function RoundService.start(world: World, remotes: Remotes)
 	local function add(player: Player)
 		economy:add(player)
 		player:SetAttribute("RoundReward", 0)
-		player.RespawnLocation = world.spawn
-		if player.Character then player.Character:PivotTo(world.spawn.CFrame + Vector3.new(0, 5, 0)) end
+		playerStates:add(player)
 		publish()
 	end
 	for _, player in Players:GetPlayers() do add(player) end
 	table.insert(connections, Players.PlayerAdded:Connect(add))
 	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
-		model:remove(player.UserId); security:remove(player); economy:remove(player)
+		model:remove(player.UserId); security:remove(player); economy:remove(player); playerStates:remove(player)
 		holds[player] = nil
 		task.defer(publish)
 	end))
@@ -105,11 +128,11 @@ function RoundService.start(world: World, remotes: Remotes)
 	end
 	for id, destination in world.destinations do
 		table.insert(connections, destination.prompt.PromptButtonHoldBegan:Connect(function(player)
-			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or not inRange(player, destination) then return end
+			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or not playerStates:canAct(player) or not inRange(player, destination) then return end
 			holds[player] = { index = orders.index, destination = id, began = now() }
 		end))
 		table.insert(connections, destination.prompt.Triggered:Connect(function(player)
-			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or now() >= model.endsAt then return end
+			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or now() >= model.endsAt or not playerStates:canAct(player) then return end
 			local timestamp = now()
 			security:sample(player, timestamp)
 			if not security:canDeliver(player, destination.target, Config.Delivery.Distance, timestamp, Config.Delivery.Cooldown) then return end
@@ -118,7 +141,10 @@ function RoundService.start(world: World, remotes: Remotes)
 			holds[player] = nil
 			if orders:interact(id, player.UserId, timestamp, heldFor) then
 				if orders.stage == "HOLDING" then feedback("뒤돌아보지 마세요! 캐릭터가 문을 향한 채 4초 유지")
-				elseif orders.stage == "COOLDOWN" then feedback("가짜 집입니다! 10초 동안 문을 열 수 없습니다") end
+				elseif orders.stage == "COOLDOWN" then
+					feedback("가짜 집이 깨어났습니다! 도망치세요")
+					chase("Fake", player, id)
+				end
 				flushOutcome(); publish()
 			end
 		end))
@@ -126,7 +152,7 @@ function RoundService.start(world: World, remotes: Remotes)
 	local function ghostHolderValid(): boolean
 		if not orders or not orders.holder then return false end
 		local player = Players:GetPlayerByUserId(orders.holder)
-		if not player or not model.participants[player.UserId] then return false end
+		if not player or not model.participants[player.UserId] or not playerStates:canAct(player) then return false end
 		local dest = world.destinations.ghost_house
 		if not inRange(player, dest) then return false end
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -140,15 +166,18 @@ function RoundService.start(world: World, remotes: Remotes)
 		elapsed += delta
 		if elapsed < 0.1 then return end
 		elapsed = 0
+		playerStates:tick()
+		monsters:tick()
 		local timestamp, ids = now(), {}
 		for _, player in Players:GetPlayers() do security:sample(player, timestamp); table.insert(ids, player.UserId) end
 		for player, hold in holds do
 			local dest = world.destinations[hold.destination]
-			if not orders or hold.index ~= orders.index or not dest or not inRange(player, dest) then holds[player] = nil end
+			if not orders or hold.index ~= orders.index or not dest or not playerStates:canAct(player) or not inRange(player, dest) then holds[player] = nil end
 		end
 		table.sort(ids)
 		local oldPhase = model.phase
 		local changed = model:tick(timestamp, ids)
+		if model.phase ~= "PLAYING" and oldPhase == "PLAYING" then monsters:stop(); playerStates:clearRound() end
 		if model.phase == "PREPARING" and oldPhase == "WAITING" then
 			orders = OrderModel.new(Config.Orders, Planner.create(model.roundId, Catalog.FakeHouses))
 			orders:advance(timestamp + Config.Round.Preparing)
@@ -156,11 +185,24 @@ function RoundService.start(world: World, remotes: Remotes)
 			table.clear(holds)
 		elseif model.phase == "WAITING" and oldPhase ~= "WAITING" then orders = nil; table.clear(holds) end
 		if model.phase == "PLAYING" and orders then
-			local oldStage = orders.stage
+			local oldStage, previousHolder = orders.stage, orders.holder
 			if orders:tick(timestamp, ghostHolderValid()) then
 				changed = true
-				if orders.stage == "COOLDOWN" and oldStage == "HOLDING" then feedback("유령이 화났습니다! 10초 대기 후 다시 노크하세요")
-				elseif orders.stage == "CALM" then feedback("음식이 식었습니다! 거인집에서 3초간 진정시키세요") end
+				if orders.stage == "COOLDOWN" and oldStage == "HOLDING" then
+					feedback("유령이 쫓아옵니다! 도망친 뒤 다시 노크하세요")
+					chase("Ghost", if previousHolder then Players:GetPlayerByUserId(previousHolder) else nil, "ghost_house")
+				elseif orders.stage == "CALM" then
+					feedback("거인이 나왔습니다! 도망치거나 현관에서 진정시키세요")
+					local nearest, distance = nil, math.huge
+					for _, candidate in Players:GetPlayers() do
+						if playerStates:canChase(candidate) then
+							local root = playerStates:root(candidate)
+							local d = (root.Position - world.destinations.giant_house.target).Magnitude
+							if d < distance then nearest, distance = candidate, d end
+						end
+					end
+					chase("Giant", nearest, "giant_house")
+				end
 				flushOutcome()
 			end
 		end
@@ -169,6 +211,8 @@ function RoundService.start(world: World, remotes: Remotes)
 	publish()
 	return function()
 		for _, connection in connections do connection:Disconnect() end
+		monsters:destroy()
+		playerStates:destroy()
 		remotes.Snapshot.OnServerInvoke = nil
 		for _, dest in world.destinations do dest.prompt.Enabled = false end
 	end

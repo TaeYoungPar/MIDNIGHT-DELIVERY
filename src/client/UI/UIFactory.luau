@@ -53,10 +53,13 @@ function Factory.create(playerGui: Instance)
 	arrow.AnchorPoint, arrow.TextXAlignment = Vector2.new(0.5, 0.5), Enum.TextXAlignment.Center
 	local distance = label(root, "Distance", "", UDim2.fromScale(0.5, 0.6), UDim2.fromOffset(210, 32), 14, Theme.Cyan)
 	distance.AnchorPoint, distance.TextXAlignment = Vector2.new(0.5, 0), Enum.TextXAlignment.Center
+	local recovery = label(root, "Recovery", "", UDim2.new(0.08, 0, 0.58, 0), UDim2.new(0.84, 0, 0, 80), 19, Theme.Orange)
+	recovery.TextXAlignment = Enum.TextXAlignment.Center
+	local team = label(root, "Team", "", UDim2.new(0, 16, 1, -65), UDim2.new(0.6, 0, 0, 50), 12, Theme.Muted)
 	local toast = label(root, "Toast", "", UDim2.new(0.1, 0, 0.72, 0), UDim2.new(0.8, 0, 0, 48), 20, Theme.Orange)
 	toast.TextXAlignment = Enum.TextXAlignment.Center
 	return { gui = gui, root = root, phase = phase, timer = timer, card = card, title = title, hint = hint,
-		toggle = toggle, stats = stats, note = note, arrow = arrow, distance = distance, toast = toast }
+		toggle = toggle, stats = stats, note = note, arrow = arrow, distance = distance, toast = toast, recovery = recovery, team = team }
 end
 
 return Factory

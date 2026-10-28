@@ -43,6 +43,15 @@ function HUD.start()
 		local now = workspace:GetServerTimeNow()
 		if now > toastUntil then ui.toast.Text = "" end
 		if not state then return end
+		if state.downUntil > now then
+			ui.recovery.Text = string.format("기절 · %d초 후 자동 복귀\n팀원이 3초간 눌러 구조할 수 있습니다", math.ceil(state.downUntil - now))
+		elseif state.protectedUntil > now then ui.recovery.Text = string.format("보호 중 · %d초", math.ceil(state.protectedUntil - now))
+		elseif state.chase.endsAt > now then
+			ui.recovery.Text = if state.chase.targetId == player.UserId then "괴물이 쫓아옵니다! 도로를 따라 도망치세요" else "팀원이 추격당하고 있습니다!"
+		else ui.recovery.Text = "" end
+		local members = {}
+		for _, member in state.members do table.insert(members, member.name .. (if member.downUntil > now then " · 구조 필요" else " · 정상")) end
+		ui.team.Text = table.concat(members, "  /  ")
 		if state.phase == "PLAYING" and state.participant then
 			local detail = state.orderHint
 			if state.stage == "HOLDING" then detail = string.format("문을 향한 채 그대로! %d초", math.max(0, math.ceil(state.holdUntil - now)))

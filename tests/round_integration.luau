@@ -30,6 +30,7 @@ local function node(path)
 end
 local game = { GetService = function(_, name)
 	if name == "Players" then return playerService end
+	if name == "PathfindingService" then return {} end
 	if name == "RunService" then return { Heartbeat = heartbeat } end
 	if name == "ReplicatedStorage" then return { Shared = node("src/shared") } end
 	error(name)
@@ -60,7 +61,19 @@ local snapshots = {}
 local remotes = { State = {FireClient = function(_, p, snapshot) snapshots[p.UserId] = snapshot end},
 	Feedback = {FireClient = function() end}, Snapshot = {} }
 local p = makePlayer(1); table.insert(players, p)
-local stop = load(node("src/server/Services/RoundService")).start(world, remotes)
+local chaseKinds = {}
+local stateStub = {
+	add = function() end, remove = function() end, tick = function() end, clearRound = function() end, destroy = function() end,
+	status = function() return { downUntil = 0, protectedUntil = 0 } end,
+	canAct = function() return true end, canChase = function() return true end,
+	root = function(_, actor) return actor.root end,
+}
+local monsterStub = {
+	start = function(_, kind) table.insert(chaseKinds, kind) end,
+	stop = function() end, tick = function() end, destroy = function() end,
+	status = function() return { kind = "", endsAt = 0, targetId = 0 } end,
+}
+local stop = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub})
 local function step(time)
 	clock = time; heartbeat:Fire(0.1)
 end
@@ -90,6 +103,7 @@ step(58); assert(snapshots[1].phase == "WAITING")
 step(78); assert(snapshots[2].participant and snapshots[1].orderTitle:find("거인"))
 step(88); move("giant_house"); step(178)
 assert(snapshots[1].late and world.destinations.giant_house.prompt.HoldDuration == 3)
+assert(chaseKinds[1] == "Giant", "late giant must start a chase")
 trigger("giant_house"); assert(p:GetAttribute("Coins") == 360, "no forged short calming")
 step(179); world.destinations.giant_house.prompt.PromptButtonHoldBegan:Fire(p)
 step(182.1); trigger("giant_house")
@@ -101,4 +115,16 @@ assert(p:GetAttribute("Coins") == 416, "no all-success bonus for partial round")
 stop()
 for _, dest in world.destinations do assert(not dest.prompt.Enabled) end
 assert(remotes.Snapshot.OnServerInvoke == nil)
-print("PASS RoundService integration: three orders, 360 reward, spectator exclusion, next-round rotation, late giant hold, partial timeouts, shutdown (mock signals)")
+-- 별도 라운드에서 유령 규칙 위반과 가짜 집 오답도 실제 추격 연결을 호출해야 한다.
+clock = 500
+local stopAgain = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub})
+step(500); step(520); step(530)
+move("ghost_house"); step(535); trigger("ghost_house"); step(536); trigger("ghost_house"); step(537); trigger("ghost_house")
+p.root.CFrame = r.CFrame.identity; step(538)
+assert(chaseKinds[#chaseKinds] == "Ghost" and snapshots[1].stage == "COOLDOWN")
+step(650); assert(snapshots[1].orderIndex == 2)
+step(770); assert(snapshots[1].orderIndex == 3)
+move("fake_2"); step(775); trigger("fake_2")
+assert(chaseKinds[#chaseKinds] == "Fake" and snapshots[1].stage == "COOLDOWN")
+stopAgain()
+print("PASS RoundService integration: three orders, 360 reward, spectator exclusion, next-round rotation, late giant hold, partial timeouts, all three chase hooks, shutdown (mock signals)")

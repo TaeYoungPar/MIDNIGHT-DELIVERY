@@ -22,4 +22,4 @@ folder.Parent = ReplicatedStorage
 local stop = RoundService.start(world, remotes)
 Players.CharacterAutoLoads = true
 game:BindToClose(stop)
-print("[MidnightDelivery] Server bootstrap ready (P2)")
+print("[MidnightDelivery] Server bootstrap ready (P3)")

@@ -1,0 +1,1616 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="1">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="2">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[--!strict
+-- 타이머와 보상은 서버에서도 같은 설정을 사용한다. 주문 3건의 제한과 고객별 조건도 중앙에서 관리한다.
+return table.freeze({
+	Build = "P3 추격·기절·구조 / Studio 검증 대기",
+	Round = table.freeze({ Waiting = 20, Preparing = 10, Playing = 420, Results = 15, MaxPlayers = 4 }),
+	Delivery = table.freeze({ Reward = 80, XP = 20, Distance = 12, Cooldown = 0.6 }),
+	Orders = table.freeze({ Duration = 120, GhostHold = 4, GhostCooldown = 10, GiantHot = 90, GiantCalm = 3, FakeLock = 10 }),
+	Recovery = table.freeze({ DownTime = 12, Protection = 4, RescueHold = 3, RescueDistance = 8,
+		Checkpoints = { Vector3.new(0, 4, -105), Vector3.new(-105, 4, -20), Vector3.new(0, 4, 120), Vector3.new(20, 4, 230) } }),
+	Monster = table.freeze({ GhostDuration = 10, GiantDuration = 12, FakeDuration = 8, PathInterval = 1.5, CatchDistance = 4.5 }),
+	Map = table.freeze({
+		Seed = 1028,
+		Size = 650,
+		Headquarters = Vector3.new(0, 0, -145),
+		Spawn = Vector3.new(0, 1, -119),
+		GhostHouse = Vector3.new(-105, 0, 15),
+		GiantHouse = Vector3.new(180, 0, 155),
+	}),
+})
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">OrderCatalog</string>
+          <string name="Source"><![CDATA[--!strict
+-- 단서는 색뿐 아니라 우편함 표식과 문패로도 구분한다.
+return table.freeze({
+	FakeHouses = table.freeze({
+		{ id = "fake_1", label = "03-A · 별 우편함", symbol = "★", clue = "붉은 별(★) 우편함 · 노란 현관등", mailbox = { 220, 76, 89 }, lamp = { 255, 215, 100 } },
+		{ id = "fake_2", label = "03-B · 원 우편함", symbol = "●", clue = "청록 원(●) 우편함 · 초록 현관등", mailbox = { 70, 190, 200 }, lamp = { 130, 255, 150 } },
+		{ id = "fake_3", label = "03-C · 마름모 우편함", symbol = "◆", clue = "보라 마름모(◆) 우편함 · 분홍 현관등", mailbox = { 160, 120, 220 }, lamp = { 255, 140, 205 } },
+	}),
+})
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">RemoteNames</string>
+          <string name="Source"><![CDATA[--!strict
+return table.freeze({ Folder = "Remotes", State = "GameStateChanged", Feedback = "UIFeedback", Snapshot = "RequestSnapshot" })
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="5">
+        <Properties>
+          <string name="Name">Strings</string>
+          <string name="Source"><![CDATA[--!strict
+return table.freeze({
+	Title = "괴물 야식 배달부",
+	Subtitle = "MIDNIGHT DELIVERY",
+	WAITING = "다음 배달을 기다리는 중",
+	PREPARING = "배달 가방을 준비하세요",
+	PLAYING = "고객의 규칙을 지키며 배달하세요",
+	RESULTS = "오늘 밤의 배달 기록",
+	OrderTitle = "01 / 파란 지붕집",
+	OrderHint = "네온 길을 따라 이동 → 현관에서 배달\nPC: E 키 · 모바일: 문 앞 상호작용 버튼",
+	Spectator = "이번 판은 대기 중 · 다음 라운드에 합류합니다",
+	SessionOnly = "개발 버전 · Coins는 서버 세션 동안만 유지됩니다",
+})
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="6">
+        <Properties>
+          <string name="Name">Types</string>
+          <string name="Source"><![CDATA[--!strict
+export type Phase = "WAITING" | "PREPARING" | "PLAYING" | "RESULTS"
+export type Snapshot = {
+	downUntil: number, protectedUntil: number, members: { { name: string, downUntil: number } },
+	chase: { kind: string, targetId: number, endsAt: number },
+	version: number, phase: Phase, roundId: number, endsAt: number,
+	participant: boolean, playerCount: number, coins: number, xp: number,
+	result: string, reward: number, orderActive: boolean, target: Vector3?,
+	orderIndex: number, orderTitle: string, orderHint: string, orderEndsAt: number,
+	stage: string, knocks: number, holdUntil: number, cooldownUntil: number,
+	hotUntil: number, late: boolean, successes: number, failures: number,
+}
+return {}
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="7">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Folder" referent="8">
+      <Properties>
+        <string name="Name">Server</string>
+      </Properties>
+      <Item class="Script" referent="9">
+        <Properties>
+          <string name="Name">Bootstrap</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local Names = require(ReplicatedStorage.Shared.RemoteNames)
+local WorldBuilder = require(script.Parent.World.WorldBuilder)
+local RoundService = require(script.Parent.Services.RoundService)
+
+-- 중복 Bootstrap은 기존 실행을 덮어쓰지 않고 명시적으로 중단한다.
+assert(not ReplicatedStorage:FindFirstChild(Names.Folder), "MidnightDelivery Remotes already exist; restart Play")
+local world = WorldBuilder.build()
+local folder = Instance.new("Folder")
+folder.Name = Names.Folder
+local state = Instance.new("RemoteEvent")
+state.Name, state.Parent = Names.State, folder
+local feedback = Instance.new("RemoteEvent")
+feedback.Name, feedback.Parent = Names.Feedback, folder
+local snapshot = Instance.new("RemoteFunction")
+snapshot.Name, snapshot.Parent = Names.Snapshot, folder
+local remotes = { State = state, Feedback = feedback, Snapshot = snapshot }
+-- 초기화는 yield 없이 진행한다. FireClient 전 Remote가 DataModel에 속하도록 먼저 공개한다.
+folder.Parent = ReplicatedStorage
+local stop = RoundService.start(world, remotes)
+Players.CharacterAutoLoads = true
+game:BindToClose(stop)
+print("[MidnightDelivery] Server bootstrap ready (P3)")
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Folder" referent="10">
+        <Properties>
+          <string name="Name">Services</string>
+        </Properties>
+        <Item class="ModuleScript" referent="11">
+          <Properties>
+            <string name="Name">EconomyService</string>
+            <string name="Source"><![CDATA[--!strict
+-- P1은 세션 재화만 제공한다. 영구 저장 기능으로 오해하지 않도록 HUD에도 표시한다.
+local Economy = {}
+Economy.__index = Economy
+type Profile = { coins: number, xp: number }
+type State = { profiles: { [number]: Profile }, paid: { [string]: boolean }, roundId: number }
+type Service = typeof(setmetatable({} :: State, Economy))
+
+function Economy.new(): Service
+	return setmetatable({ profiles = {}, paid = {}, roundId = 0 }, Economy)
+end
+
+function Economy.add(self: Service, player: any)
+	if not self.profiles[player.UserId] then self.profiles[player.UserId] = { coins = 0, xp = 0 } end
+	local profile = self.profiles[player.UserId]
+	player:SetAttribute("Coins", profile.coins)
+	player:SetAttribute("XP", profile.xp)
+end
+
+function Economy.remove(self: Service, player: any)
+	-- 퇴장 기록을 무한히 쌓지 않는다. 현재 주문의 paid 키는 라운드 종료까지 유지한다.
+	self.profiles[player.UserId] = nil
+end
+
+function Economy.award(self: Service, player: any, roundId: number, coins: number, xp: number, orderId: number?): boolean
+	if roundId < self.roundId then return false end
+	if roundId > self.roundId then self.roundId = roundId; table.clear(self.paid) end
+	local id = player.UserId
+	local key = tostring(orderId or 1) .. ":" .. tostring(id)
+	if self.paid[key] or not self.profiles[id] then return false end
+	self.paid[key] = true
+	local profile = self.profiles[id]
+	profile.coins += coins
+	profile.xp += xp
+	player:SetAttribute("Coins", profile.coins)
+	player:SetAttribute("XP", profile.xp)
+	return true
+end
+
+return Economy
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="12">
+          <Properties>
+            <string name="Name">MonsterService</string>
+            <string name="Source"><![CDATA[--!strict
+local Pathfinding = game:GetService("PathfindingService")
+local Config = require(game:GetService("ReplicatedStorage").Shared.Config)
+local Factory = require(script.Parent.Parent.World.MonsterFactory)
+local Service = {}
+Service.__index = Service
+type Actor = { model: Model, root: Part, humanoid: Humanoid }
+type Chase = { kind: string, target: Player, character: Model?, actor: Actor, endsAt: number,
+	nextPathAt: number, busy: boolean, waypoints: { PathWaypoint }, waypoint: number }
+type StateAccess = { canChase: (any, Player) -> boolean, root: (any, Player) -> (BasePart?, Humanoid?), down: (any, Player) -> boolean }
+type Store = { parent: Instance, states: StateAccess, changed: () -> (), active: Chase? }
+export type Runtime = typeof(setmetatable({} :: Store, Service))
+function Service.new(parent: Instance, states: StateAccess, changed: () -> ()): Runtime
+	return setmetatable({ parent = parent, states = states, changed = changed, active = nil }, Service)
+end
+function Service.stop(self: Runtime)
+	if not self.active then return end
+	local active = self.active
+	self.active = nil
+	active.actor.model:Destroy()
+	self.changed()
+end
+function Service.status(self: Runtime)
+	local active = self.active
+	return { kind = if active then active.kind else "", targetId = if active then active.target.UserId else 0,
+		endsAt = if active then active.endsAt else 0 }
+end
+function Service.start(self: Runtime, kind: string, target: Player?, origin: Vector3)
+	if not target or not self.states:canChase(target) then return end
+	self:stop()
+	local duration = if kind == "Ghost" then Config.Monster.GhostDuration elseif kind == "Giant" then Config.Monster.GiantDuration else Config.Monster.FakeDuration
+	local groundRay = RaycastParams.new()
+	groundRay.FilterType, groundRay.FilterDescendantsInstances = Enum.RaycastFilterType.Exclude, { self.parent, target.Character }
+	-- 현관 바깥에서 지면을 찾고 생성한다. 집 내부/지붕 위 스폰을 피한다.
+	local hit = workspace:Raycast(origin + Vector3.new(0, 25, 0), Vector3.new(0, -80, 0), groundRay)
+	local spawnPosition = if hit then hit.Position + Vector3.new(0, 7, 0) else origin + Vector3.new(0, 7, 0)
+	local actor = Factory.create(self.parent, kind, spawnPosition)
+	actor.root:SetNetworkOwner(nil)
+	self.active = { kind = kind, target = target, character = target.Character, actor = actor,
+		endsAt = workspace:GetServerTimeNow() + duration, nextPathAt = 0, busy = false, waypoints = {}, waypoint = 1 }
+	self.changed()
+end
+function Service.tick(self: Runtime)
+	local active = self.active
+	if not active then return end
+	local timestamp = workspace:GetServerTimeNow()
+	local targetRoot = self.states:root(active.target)
+	if timestamp >= active.endsAt or active.target.Character ~= active.character or not self.states:canChase(active.target)
+		or not targetRoot or not active.actor.model.Parent or active.actor.humanoid.Health <= 0 or active.actor.root.Position.Y < -50 then self:stop(); return end
+	local actor = active.actor
+	local delta = targetRoot.Position - actor.root.Position
+	-- 서버 근접 판정 + 시야 검사. 벽 뒤 플레이어를 거리만으로 기절시키지 않는다.
+	if delta.Magnitude <= Config.Monster.CatchDistance then
+		local ray = RaycastParams.new()
+		ray.FilterType, ray.FilterDescendantsInstances = Enum.RaycastFilterType.Exclude, { actor.model }
+		local hit = workspace:Raycast(actor.root.Position, delta, ray)
+		if not hit or (active.character and hit.Instance:IsDescendantOf(active.character)) then
+			self.states:down(active.target)
+			self:stop()
+			return
+		end
+	end
+	if timestamp >= active.nextPathAt and not active.busy then
+		active.busy, active.nextPathAt = true, timestamp + Config.Monster.PathInterval
+		local startPosition, goal = actor.root.Position, targetRoot.Position
+		task.spawn(function()
+			local ok, waypoints = pcall(function()
+				local path = Pathfinding:CreatePath({ AgentRadius = if active.kind == "Giant" then 3.5 else 2.5, AgentHeight = 9, AgentCanJump = true })
+				path:ComputeAsync(startPosition, goal)
+				return if path.Status == Enum.PathStatus.Success then path:GetWaypoints() else {}
+			end)
+			-- 취소된 ComputeAsync가 늦게 돌아와 새 추격의 상태를 덮어쓰지 않게 한다.
+			if self.active ~= active then return end
+			active.busy = false
+			active.waypoints = if ok then waypoints else {}
+			active.waypoint = 2
+		end)
+	end
+	local waypoint = active.waypoints[active.waypoint]
+	if waypoint and (actor.root.Position - waypoint.Position).Magnitude < 4 then
+		active.waypoint += 1; waypoint = active.waypoints[active.waypoint]
+	end
+	if waypoint then
+		if waypoint.Action == Enum.PathWaypointAction.Jump then actor.humanoid.Jump = true end
+		actor.humanoid:MoveTo(waypoint.Position)
+	else
+		-- 경로 실패 시 물리 충돌을 유지한 MoveTo 폴백. CFrame 순간이동으로 벽을 뚫지 않는다.
+		actor.humanoid:MoveTo(targetRoot.Position)
+	end
+end
+function Service.destroy(self: Runtime) self:stop() end
+return Service
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="13">
+          <Properties>
+            <string name="Name">OrderModel</string>
+            <string name="Source"><![CDATA[--!strict
+-- 순수 주문 규칙. 위치/방향/홀드 시간은 엔진 연결층이 서버에서 검증해 전달한다.
+local Order = {}
+Order.__index = Order
+export type Spec = { kind: string, destination: string, title: string, hint: string }
+export type Outcome = { success: boolean, reward: number, reason: string, index: number }
+type Settings = { Duration: number, GhostHold: number, GhostCooldown: number, GiantHot: number, GiantCalm: number, FakeLock: number }
+type State = {
+	settings: Settings, specs: { Spec }, index: number, expiresAt: number, stage: string,
+	startedAt: number, cooldownUntil: number, knocks: number, lastKnock: number,
+	holdUntil: number, holder: number?, attempts: number, mistakes: number, late: boolean,
+	pending: Outcome?, successes: number, failures: number,
+}
+export type Model = typeof(setmetatable({} :: State, Order))
+
+function Order.new(settings: Settings, specs: { Spec }): Model
+	return setmetatable({ settings = settings, specs = specs, index = 0, expiresAt = 0, stage = "IDLE",
+		startedAt = 0, cooldownUntil = 0, knocks = 0, lastKnock = -math.huge, holdUntil = 0,
+		holder = nil, attempts = 0, mistakes = 0, late = false, pending = nil, successes = 0, failures = 0 }, Order)
+end
+function Order.current(self: Model): Spec?
+	return self.specs[self.index]
+end
+function Order.advance(self: Model, now: number): boolean
+	if self.index >= #self.specs then self.stage = "DONE"; return false end
+	self.index += 1
+	self.stage, self.startedAt, self.expiresAt = "ACTIVE", now, now + self.settings.Duration
+	self.cooldownUntil, self.knocks, self.lastKnock = 0, 0, -math.huge
+	self.holdUntil, self.holder, self.attempts, self.mistakes, self.late = 0, nil, 0, 0, false
+	return true
+end
+function Order.resolve(self: Model, success: boolean, reward: number, reason: string)
+	if self.stage == "RESOLVED" or self.stage == "DONE" or self.stage == "IDLE" then return end
+	self.stage = "RESOLVED"
+	if success then self.successes += 1 else self.failures += 1 end
+	self.pending = { success = success, reward = reward, reason = reason, index = self.index }
+end
+function Order.takeOutcome(self: Model): Outcome?
+	local result = self.pending
+	self.pending = nil
+	return result
+end
+function Order.tick(self: Model, now: number, holderValid: boolean): boolean
+	local spec = self:current()
+	if not spec or self.stage == "RESOLVED" or self.stage == "DONE" then return false end
+	if now >= self.expiresAt then self:resolve(false, 0, "주문 시간 초과"); return true end
+	if self.stage == "COOLDOWN" and now >= self.cooldownUntil then self.stage = "ACTIVE"; return true end
+	if spec.kind == "Giant" and not self.late and now >= self.startedAt + self.settings.GiantHot then
+		self.late, self.stage = true, "CALM"
+		return true
+	end
+	if self.stage == "HOLDING" then
+		if not holderValid then
+			self.attempts += 1
+			self.knocks, self.holder = 0, nil
+			if self.attempts >= 3 then self:resolve(false, 0, "유령 규칙 3회 위반")
+			else self.stage, self.cooldownUntil = "COOLDOWN", now + self.settings.GhostCooldown end
+			return true
+		elseif now >= self.holdUntil then self:resolve(true, 80, "유령 배달 성공"); return true end
+	end
+	return false
+end
+function Order.interact(self: Model, destination: string, userId: number, now: number, heldFor: number): boolean
+	local spec = self:current()
+	if not spec or now >= self.expiresAt or (self.stage ~= "ACTIVE" and self.stage ~= "CALM") then return false end
+	if spec.kind == "Fake" then
+		if not string.match(destination, "^fake_[123]$") then return false end
+		if destination == spec.destination then self:resolve(true, 80, "진짜 주소를 찾았습니다")
+		else
+			self.mistakes += 1
+			if self.mistakes >= 2 then self:resolve(false, 0, "가짜 집 2회 오배송")
+			else self.stage, self.cooldownUntil = "COOLDOWN", now + self.settings.FakeLock end
+		end
+	elseif destination ~= spec.destination then return false
+	elseif spec.kind == "Ghost" then
+		if now - self.lastKnock < 0.6 then return false end
+		self.lastKnock, self.knocks = now, self.knocks + 1
+		if self.knocks == 3 then
+			self.stage, self.holder, self.holdUntil = "HOLDING", userId, now + self.settings.GhostHold
+		end
+	elseif spec.kind == "Giant" then
+		-- 90초 경계에서 Heartbeat보다 프롬프트가 먼저 도착해도 할인 규칙이 적용된다.
+		local isLate = self.late or now >= self.startedAt + self.settings.GiantHot
+		if isLate and heldFor < self.settings.GiantCalm then return false end
+		self.late = isLate
+		self:resolve(true, if self.late then 56 else 80, if self.late then "거인 진정 성공 · 식은 음식" else "따뜻한 음식 배달 성공")
+	else return false end
+	return true
+end
+return Order
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="14">
+          <Properties>
+            <string name="Name">OrderPlanner</string>
+            <string name="Source"><![CDATA[--!strict
+local Planner = {}
+function Planner.create(roundId: number, candidates)
+	local chosen = candidates[(roundId - 1) % #candidates + 1]
+	local specs = {
+		{ kind = "Ghost", destination = "ghost_house", title = "유령 · 01 파란 지붕집", hint = "문을 3번 두드린 뒤 4초 동안 문을 향하세요.\n카메라 대신 캐릭터 방향을 검사합니다." },
+		{ kind = "Giant", destination = "giant_house", title = "거인 · 02 큰 현관집", hint = "90초 안에 따뜻하게 배달하세요.\n늦으면 현관에서 3초간 진정시키기 · 보상 56 Coins" },
+		{ kind = "Fake", destination = chosen.id, title = "수상한 주소 · 외곽 주택 03", hint = "단서: " .. chosen.clue .. "\n잘못된 집은 10초 대기 · 2회 실수 시 실패" },
+	}
+	-- 첫 판은 학습 순서, 다음 판부터 시작 고객과 단서가 바뀐다. 세 종류는 매번 모두 등장한다.
+	local result = {}
+	for offset = 0, 2 do table.insert(result, specs[(roundId - 1 + offset) % 3 + 1]) end
+	return result
+end
+return Planner
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="15">
+          <Properties>
+            <string name="Name">PlayerStateModel</string>
+            <string name="Source"><![CDATA[--!strict
+-- 기절/복귀는 단조 시각과 세대 번호로 관리하여 구조·자동 복귀 경합을 한 번만 처리한다.
+local State = {}
+State.__index = State
+export type Entry = { downUntil: number, protectedUntil: number, generation: number }
+type Store = { entries: { [number]: Entry }, duration: number, protection: number }
+export type Model = typeof(setmetatable({} :: Store, State))
+function State.new(duration: number, protection: number): Model
+	return setmetatable({ entries = {}, duration = duration, protection = protection }, State)
+end
+function State.reset(self: Model, id: number, now: number)
+	local previous = self.entries[id]
+	self.entries[id] = { downUntil = 0, protectedUntil = now + self.protection, generation = if previous then previous.generation + 1 else 1 }
+end
+function State.remove(self: Model, id: number) self.entries[id] = nil end
+function State.canAct(self: Model, id: number): boolean
+	local entry = self.entries[id]
+	return entry ~= nil and entry.downUntil == 0
+end
+function State.down(self: Model, id: number, now: number): boolean
+	local entry = self.entries[id]
+	if not entry or entry.downUntil ~= 0 or now < entry.protectedUntil then return false end
+	entry.downUntil = now + self.duration
+	entry.generation += 1
+	return true
+end
+function State.recover(self: Model, id: number, generation: number, now: number): boolean
+	local entry = self.entries[id]
+	if not entry or entry.downUntil == 0 or entry.generation ~= generation then return false end
+	entry.downUntil, entry.protectedUntil = 0, now + self.protection
+	entry.generation += 1
+	return true
+end
+return State
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="16">
+          <Properties>
+            <string name="Name">PlayerStateService</string>
+            <string name="Source"><![CDATA[--!strict
+local Players = game:GetService("Players")
+local Config = require(game:GetService("ReplicatedStorage").Shared.Config)
+local StateModel = require(script.Parent.PlayerStateModel)
+local Service = {}
+Service.__index = Service
+type Downed = {
+	root: BasePart, humanoid: Humanoid, character: Model, attachment: Attachment, generation: number,
+	anchored: boolean, walkSpeed: number, jumpPower: number, jumpHeight: number, autoRotate: boolean,
+	connections: { RBXScriptConnection },
+}
+type Rescue = { victim: Player, generation: number, character: Model?, began: number, endedAt: number? }
+type Store = { spawn: SpawnLocation, isParticipant: (Player) -> boolean, changed: () -> (), model: StateModel.Model,
+	bindings: { [Player]: RBXScriptConnection }, downed: { [Player]: Downed }, rescuers: { [Player]: Rescue }, stopped: boolean }
+export type Runtime = typeof(setmetatable({} :: Store, Service))
+
+function Service.new(spawn: SpawnLocation, isParticipant: (Player) -> boolean, changed: () -> ()): Runtime
+	return setmetatable({ spawn = spawn, isParticipant = isParticipant, changed = changed,
+		model = StateModel.new(Config.Recovery.DownTime, Config.Recovery.Protection),
+		bindings = {}, downed = {}, rescuers = {}, stopped = false }, Service)
+end
+function Service.now(self: Runtime) return workspace:GetServerTimeNow() end
+function Service.root(self: Runtime, player: Player): (BasePart?, Humanoid?)
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then return nil, nil end
+	local position = root.Position
+	if position.X ~= position.X or position.Y ~= position.Y or position.Z ~= position.Z
+		or math.abs(position.X) > 1e6 or math.abs(position.Y) > 1e6 or math.abs(position.Z) > 1e6 then return nil, nil end
+	return root, humanoid
+end
+function Service.canAct(self: Runtime, player: Player): boolean
+	return self.model:canAct(player.UserId) and self:root(player) ~= nil
+end
+function Service.canChase(self: Runtime, player: Player): boolean
+	local entry = self.model.entries[player.UserId]
+	return self.isParticipant(player) and self:canAct(player) and entry ~= nil and self:now() >= entry.protectedUntil
+end
+function Service.status(self: Runtime, player: Player)
+	local entry = self.model.entries[player.UserId]
+	return { downUntil = if entry then entry.downUntil else 0, protectedUntil = if entry then entry.protectedUntil else 0 }
+end
+function Service.clearRecord(self: Runtime, player: Player)
+	local record = self.downed[player]
+	if not record then return end
+	for _, connection in record.connections do connection:Disconnect() end
+	record.attachment:Destroy()
+	if record.root.Parent then record.root.Anchored = record.anchored end
+	if record.humanoid.Parent then
+		record.humanoid.WalkSpeed, record.humanoid.JumpPower = record.walkSpeed, record.jumpPower
+		record.humanoid.JumpHeight, record.humanoid.AutoRotate = record.jumpHeight, record.autoRotate
+	end
+	self.downed[player] = nil
+	for helper, hold in self.rescuers do if helper == player or hold.victim == player then self.rescuers[helper] = nil end end
+end
+function Service.spawnCharacter(self: Runtime, player: Player, character: Model)
+	local root = character:WaitForChild("HumanoidRootPart", 10)
+	local humanoid = character:WaitForChild("Humanoid", 10)
+	if self.stopped or not self.bindings[player] or player.Character ~= character or not root or not root:IsA("BasePart") or not humanoid or not humanoid:IsA("Humanoid") then return end
+	self:clearRecord(player)
+	self.model:reset(player.UserId, self:now())
+	-- SpawnLocation도 캐릭터 Pivot도 같은 도로 방향(+Z)을 사용한다.
+	character:PivotTo(self.spawn.CFrame + Vector3.new((player.UserId % 4 - 1.5) * 3, 4, 0))
+	character:SetAttribute("MidnightSpawnReady", true)
+	self.changed()
+end
+function Service.add(self: Runtime, player: Player)
+	self.model:reset(player.UserId, self:now())
+	player.RespawnLocation = self.spawn
+	self.bindings[player] = player.CharacterAdded:Connect(function(character)
+		task.spawn(function() self:spawnCharacter(player, character) end)
+	end)
+	local character = player.Character
+	if character then task.spawn(function() self:spawnCharacter(player, character) end) end
+end
+function Service.remove(self: Runtime, player: Player)
+	if self.bindings[player] then self.bindings[player]:Disconnect(); self.bindings[player] = nil end
+	self:clearRecord(player)
+	self.rescuers[player] = nil
+	self.model:remove(player.UserId)
+end
+function Service.validRescue(self: Runtime, helper: Player, victim: Player): boolean
+	if helper == victim or not self.isParticipant(helper) or not self.isParticipant(victim) or not self:canAct(helper) then return false end
+	local record = self.downed[victim]
+	local helperRoot = self:root(helper)
+	if not record or not helperRoot or victim.Character ~= record.character or record.humanoid.Health <= 0 then return false end
+	local delta = record.root.Position - helperRoot.Position
+	if delta.Magnitude ~= delta.Magnitude or delta.Magnitude > Config.Recovery.RescueDistance then return false end
+	local ray = RaycastParams.new()
+	ray.FilterType, ray.FilterDescendantsInstances = Enum.RaycastFilterType.Exclude, { helper.Character, victim.Character }
+	return workspace:Raycast(helperRoot.Position, delta, ray) == nil
+end
+function Service.recover(self: Runtime, player: Player, automatic: boolean): boolean
+	local record = self.downed[player]
+	if not record or not self.model:recover(player.UserId, record.generation, self:now()) then return false end
+	if automatic and player.Character == record.character then
+		-- 구조받지 못해도 가장 가까운 도로 체크포인트에서 복귀한다.
+		local nearest, distance = Config.Recovery.Checkpoints[1], math.huge
+		for _, point in Config.Recovery.Checkpoints do
+			local d = (record.root.Position - point).Magnitude
+			if d < distance then nearest, distance = point, d end
+		end
+		record.character:PivotTo(CFrame.new(nearest) * CFrame.Angles(0, math.pi, 0))
+		record.root.AssemblyLinearVelocity, record.root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
+	end
+	self:clearRecord(player)
+	self.changed()
+	return true
+end
+function Service.down(self: Runtime, player: Player): boolean
+	local root, humanoid = self:root(player)
+	local character = player.Character
+	if not character or not root or not humanoid or not self.isParticipant(player) or not self.model:down(player.UserId, self:now()) then return false end
+	local attachment = Instance.new("Attachment")
+	attachment.Name, attachment.Parent = "MidnightRescue", root
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText, prompt.ObjectText = "팀원 구조", player.DisplayName
+	prompt.HoldDuration, prompt.MaxActivationDistance = Config.Recovery.RescueHold, Config.Recovery.RescueDistance
+	prompt.RequiresLineOfSight, prompt.Parent = true, attachment
+	local record: Downed = { root = root, humanoid = humanoid, character = character, attachment = attachment,
+		generation = self.model.entries[player.UserId].generation, anchored = root.Anchored,
+		walkSpeed = humanoid.WalkSpeed, jumpPower = humanoid.JumpPower, jumpHeight = humanoid.JumpHeight,
+		autoRotate = humanoid.AutoRotate, connections = {} }
+	self.downed[player] = record
+	humanoid.Sit, humanoid.WalkSpeed, humanoid.JumpPower, humanoid.JumpHeight, humanoid.AutoRotate = false, 0, 0, 0, false
+	root.Anchored = true
+	table.insert(record.connections, prompt.PromptButtonHoldBegan:Connect(function(helper)
+		if self:validRescue(helper, player) then
+			self.rescuers[helper] = { victim = player, generation = record.generation, character = helper.Character, began = self:now() }
+		end
+	end))
+	table.insert(record.connections, prompt.PromptButtonHoldEnded:Connect(function(helper)
+		-- Triggered와 같은 틱에 종료될 수 있어 지연 후 시각을 확인한다.
+		local hold = self.rescuers[helper]
+		if hold and hold.victim == player then hold.endedAt = self:now() end
+	end))
+	table.insert(record.connections, prompt.Triggered:Connect(function(helper)
+		local hold = self.rescuers[helper]
+		if not hold or hold.victim ~= player or hold.generation ~= record.generation or hold.character ~= helper.Character then return end
+		if hold.endedAt and self:now() - hold.endedAt > 0.2 then return end
+		local endTime = hold.endedAt or self:now()
+		if endTime - hold.began < Config.Recovery.RescueHold - 0.15 or not self:validRescue(helper, player) then return end
+		local entry = self.model.entries[player.UserId]
+		if entry and self:now() < entry.downUntil then self:recover(player, false) end
+		self.rescuers[helper] = nil
+	end))
+	self.changed()
+	return true
+end
+function Service.tick(self: Runtime)
+	local timestamp = self:now()
+	for helper, hold in self.rescuers do
+		if hold.character ~= helper.Character or not self:validRescue(helper, hold.victim)
+			or (hold.endedAt and timestamp - hold.endedAt > 0.2) then self.rescuers[helper] = nil end
+	end
+	local pending = {}
+	for player, record in self.downed do
+		local entry = self.model.entries[player.UserId]
+		if not entry or player.Character ~= record.character or record.humanoid.Health <= 0 then table.insert(pending, {player = player, automatic = false})
+		elseif timestamp >= entry.downUntil then table.insert(pending, {player = player, automatic = true}) end
+	end
+	for _, item in pending do
+		if item.automatic then self:recover(item.player, true)
+		else self:clearRecord(item.player); self.model:reset(item.player.UserId, timestamp); self.changed() end
+	end
+end
+function Service.clearRound(self: Runtime)
+	local pending = {}; for player in self.downed do table.insert(pending, player) end
+	for _, player in pending do self:recover(player, true) end
+	table.clear(self.rescuers)
+end
+function Service.destroy(self: Runtime)
+	self.stopped = true
+	local pending = {}; for player in self.bindings do table.insert(pending, player) end
+	for _, player in pending do self:remove(player) end
+end
+return Service
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="17">
+          <Properties>
+            <string name="Name">RoundModel</string>
+            <string name="Source"><![CDATA[--!strict
+-- Roblox 객체에 의존하지 않는 라운드 상태 머신. now는 서버 시간이 주입된다.
+local RoundModel = {}
+RoundModel.__index = RoundModel
+
+type Settings = { Waiting: number, Preparing: number, Playing: number, Results: number, MaxPlayers: number }
+type State = {
+	settings: Settings, phase: string, roundId: number, endsAt: number,
+	participants: { [number]: boolean }, orderActive: boolean, result: string,
+}
+export type Model = typeof(setmetatable({} :: State, RoundModel))
+
+function RoundModel.new(settings: Settings): Model
+	return setmetatable({ settings = settings, phase = "WAITING", roundId = 0, endsAt = 0,
+		participants = {}, orderActive = false, result = "" }, RoundModel)
+end
+
+function RoundModel.remove(self: Model, userId: number)
+	self.participants[userId] = nil
+end
+
+function RoundModel.tick(self: Model, now: number, userIds: { number }): boolean
+	if #userIds == 0 then
+		local changed = self.endsAt ~= 0 or self.phase ~= "WAITING"
+		self.phase, self.endsAt, self.orderActive = "WAITING", 0, false
+		table.clear(self.participants)
+		return changed
+	end
+	if self.phase == "WAITING" and self.endsAt == 0 then
+		self.endsAt = now + self.settings.Waiting
+		return true
+	end
+	if self.phase == "PLAYING" and next(self.participants) == nil then
+		self.phase, self.result, self.orderActive = "RESULTS", "배달 팀이 모두 나갔습니다", false
+		self.endsAt = now + self.settings.Results
+		return true
+	end
+	if now < self.endsAt then return false end
+	if self.phase == "WAITING" then
+		self.roundId += 1
+		table.clear(self.participants)
+		-- 서버가 제공한 입장 목록에서 최대 4명만 확정한다. 중도 입장은 끼어들지 않는다.
+		for index, userId in userIds do
+			if index <= self.settings.MaxPlayers then self.participants[userId] = true end
+		end
+		self.result = ""
+		self.phase, self.endsAt = "PREPARING", now + self.settings.Preparing
+	elseif self.phase == "PREPARING" then
+		self.phase, self.endsAt, self.orderActive = "PLAYING", now + self.settings.Playing, true
+	elseif self.phase == "PLAYING" then
+		self.phase, self.result, self.orderActive = "RESULTS", "시간 초과 · 배달 실패", false
+		self.endsAt = now + self.settings.Results
+	elseif self.phase == "RESULTS" then
+		self.phase, self.endsAt = "WAITING", now + self.settings.Waiting
+		table.clear(self.participants)
+	end
+	return true
+end
+
+function RoundModel.finish(self: Model, now: number, result: string)
+	if self.phase ~= "PLAYING" then return end
+	self.orderActive, self.phase, self.result = false, "RESULTS", result
+	self.endsAt = now + self.settings.Results
+end
+
+function RoundModel.complete(self: Model, userId: number, expectedRound: number, now: number): { number }?
+	if self.phase ~= "PLAYING" or not self.orderActive or expectedRound ~= self.roundId
+		or not self.participants[userId] or now >= self.endsAt then return nil end
+	-- 양보/yield 없이 주문을 먼저 닫아 동시 클릭과 중복 보상을 차단한다.
+	self.orderActive, self.phase, self.result = false, "RESULTS", "배달 성공!"
+	self.endsAt = now + self.settings.Results
+	local recipients = {}
+	for id in self.participants do table.insert(recipients, id) end
+	return recipients
+end
+
+return RoundModel
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="18">
+          <Properties>
+            <string name="Name">RoundService</string>
+            <string name="Source"><![CDATA[--!strict
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Shared = game:GetService("ReplicatedStorage").Shared
+local Config = require(Shared.Config)
+local Catalog = require(Shared.OrderCatalog)
+local RoundModel = require(script.Parent.RoundModel)
+local OrderModel = require(script.Parent.OrderModel)
+local Planner = require(script.Parent.OrderPlanner)
+local Security = require(script.Parent.SecurityService)
+local Economy = require(script.Parent.EconomyService)
+local PlayerStates = require(script.Parent.PlayerStateService)
+local Monsters = require(script.Parent.MonsterService)
+local RoundService = {}
+type Destination = { prompt: ProximityPrompt, target: Vector3, door: Part }
+type World = { world: Folder, spawn: SpawnLocation, destinations: { [string]: Destination }, fakeCenter: Vector3 }
+type Remotes = { State: RemoteEvent, Feedback: RemoteEvent, Snapshot: RemoteFunction }
+
+function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
+	local model = RoundModel.new(Config.Round)
+	local orders: OrderModel.Model? = nil
+	local security, economy = Security.new(), Economy.new()
+	local playerStates, monsters
+	local version, elapsed = 0, 0
+	local connections = {}
+	local holds: { [Player]: { index: number, destination: string, began: number } } = {}
+	local function now() return workspace:GetServerTimeNow() end
+	local function snapshot(player: Player)
+		local spec = orders and orders:current()
+		local members = {}
+		for _, member in Players:GetPlayers() do
+			if model.participants[member.UserId] then
+				local status = if playerStates then playerStates:status(member) else { downUntil = 0, protectedUntil = 0 }
+				table.insert(members, { name = member.DisplayName, downUntil = status.downUntil })
+			end
+		end
+		local status = if playerStates then playerStates:status(player) else { downUntil = 0, protectedUntil = 0 }
+		local target = if spec and spec.kind == "Fake" then world.fakeCenter
+			elseif spec then world.destinations[spec.destination].target else nil
+		return {
+			downUntil = status.downUntil, protectedUntil = status.protectedUntil, members = members,
+			chase = if monsters then monsters:status() else { kind = "", endsAt = 0, targetId = 0 },
+			version = version, phase = model.phase, roundId = model.roundId, endsAt = model.endsAt,
+			participant = model.participants[player.UserId] == true, playerCount = #Players:GetPlayers(),
+			coins = player:GetAttribute("Coins") or 0, xp = player:GetAttribute("XP") or 0,
+			result = model.result, reward = player:GetAttribute("RoundReward") or 0,
+			orderActive = model.orderActive, target = target,
+			orderIndex = if orders then orders.index else 0, orderTitle = if spec then spec.title else "",
+			orderHint = if spec then spec.hint else "", orderEndsAt = if orders then orders.expiresAt else 0,
+			stage = if orders then orders.stage else "", knocks = if orders then orders.knocks else 0,
+			holdUntil = if orders then orders.holdUntil else 0, cooldownUntil = if orders then orders.cooldownUntil else 0,
+			hotUntil = if orders and spec and spec.kind == "Giant" then orders.startedAt + Config.Orders.GiantHot else 0,
+			late = if orders then orders.late else false, successes = if orders then orders.successes else 0,
+			failures = if orders then orders.failures else 0,
+		}
+	end
+	local function publish()
+		version += 1
+		local spec = orders and orders:current()
+		for id, destination in world.destinations do
+			local selected = spec and (spec.destination == id or (spec.kind == "Fake" and string.match(id, "^fake_")))
+			destination.prompt.Enabled = model.phase == "PLAYING" and selected ~= nil and selected ~= false
+				and orders ~= nil and (orders.stage == "ACTIVE" or orders.stage == "CALM")
+			destination.prompt.HoldDuration = if spec and spec.kind == "Giant" and orders and orders.late then Config.Orders.GiantCalm else 0.6
+			destination.prompt.ActionText = if spec and spec.kind == "Ghost" then "문 두드리기"
+				elseif spec and spec.kind == "Giant" and orders and orders.late then "진정시키기" else "야식 배달"
+		end
+		for _, player in Players:GetPlayers() do remotes.State:FireClient(player, snapshot(player)) end
+	end
+	local function participant(player)
+		return model.phase == "PLAYING" and model.participants[player.UserId] == true
+	end
+	playerStates = if dependencies and dependencies.playerStates then dependencies.playerStates else PlayerStates.new(world.spawn, participant, publish)
+	monsters = if dependencies and dependencies.monsters then dependencies.monsters else Monsters.new(world.world:FindFirstChild("NPCs"), playerStates, publish)
+	local function chase(kind, player, destinationId)
+		local destination = world.destinations[destinationId]
+		if destination and player then monsters:start(kind, player, destination.target + Vector3.new(0, 0, -10)) end
+	end
+	local function feedback(message: string)
+		for _, player in Players:GetPlayers() do remotes.Feedback:FireClient(player, message) end
+	end
+	local function award(coins: number, orderId: number)
+		for id in model.participants do
+			local player = Players:GetPlayerByUserId(id)
+			if player and economy:award(player, model.roundId, coins, if orderId == 4 then 0 else Config.Delivery.XP, orderId) then
+				player:SetAttribute("RoundReward", (player:GetAttribute("RoundReward") or 0) + coins)
+			end
+		end
+	end
+	local function flushOutcome()
+		if not orders then return end
+		local result = orders:takeOutcome()
+		if not result then return end
+		monsters:stop()
+		if result.success then award(result.reward, result.index) end
+		feedback(result.reason .. (if result.success then " · +" .. result.reward .. " Coins" else " · 다음 주문으로 진행"))
+		table.clear(holds)
+		if not orders:advance(now()) then
+			playerStates:clearRound()
+			if orders.successes == 3 then award(120, 4) end
+			model:finish(now(), string.format("배달 %d/3 성공 · %d건 실패", orders.successes, orders.failures))
+		end
+	end
+	local function add(player: Player)
+		economy:add(player)
+		player:SetAttribute("RoundReward", 0)
+		playerStates:add(player)
+		publish()
+	end
+	for _, player in Players:GetPlayers() do add(player) end
+	table.insert(connections, Players.PlayerAdded:Connect(add))
+	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
+		model:remove(player.UserId); security:remove(player); economy:remove(player); playerStates:remove(player)
+		holds[player] = nil
+		task.defer(publish)
+	end))
+	remotes.Snapshot.OnServerInvoke = function(player)
+		if not security:allowSnapshot(player, now()) then return nil end
+		return snapshot(player)
+	end
+	local function inRange(player: Player, destination: Destination): boolean
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then return false end
+		local distance = (root.Position - destination.target).Magnitude
+		return distance == distance and distance <= Config.Delivery.Distance
+	end
+	for id, destination in world.destinations do
+		table.insert(connections, destination.prompt.PromptButtonHoldBegan:Connect(function(player)
+			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or not playerStates:canAct(player) or not inRange(player, destination) then return end
+			holds[player] = { index = orders.index, destination = id, began = now() }
+		end))
+		table.insert(connections, destination.prompt.Triggered:Connect(function(player)
+			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or now() >= model.endsAt or not playerStates:canAct(player) then return end
+			local timestamp = now()
+			security:sample(player, timestamp)
+			if not security:canDeliver(player, destination.target, Config.Delivery.Distance, timestamp, Config.Delivery.Cooldown) then return end
+			local hold = holds[player]
+			local heldFor = if hold and hold.index == orders.index and hold.destination == id then timestamp - hold.began else 0
+			holds[player] = nil
+			if orders:interact(id, player.UserId, timestamp, heldFor) then
+				if orders.stage == "HOLDING" then feedback("뒤돌아보지 마세요! 캐릭터가 문을 향한 채 4초 유지")
+				elseif orders.stage == "COOLDOWN" then
+					feedback("가짜 집이 깨어났습니다! 도망치세요")
+					chase("Fake", player, id)
+				end
+				flushOutcome(); publish()
+			end
+		end))
+	end
+	local function ghostHolderValid(): boolean
+		if not orders or not orders.holder then return false end
+		local player = Players:GetPlayerByUserId(orders.holder)
+		if not player or not model.participants[player.UserId] or not playerStates:canAct(player) then return false end
+		local dest = world.destinations.ghost_house
+		if not inRange(player, dest) then return false end
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		if not root or not root:IsA("BasePart") then return false end
+		if (root.Position - dest.target).Magnitude > 10 then return false end
+		local direction = dest.door.Position - root.Position
+		local flat = Vector3.new(direction.X, 0, direction.Z)
+		return flat.Magnitude > 0.1 and root.CFrame.LookVector:Dot(flat.Unit) >= 0.55
+	end
+	table.insert(connections, RunService.Heartbeat:Connect(function(delta)
+		elapsed += delta
+		if elapsed < 0.1 then return end
+		elapsed = 0
+		playerStates:tick()
+		monsters:tick()
+		local timestamp, ids = now(), {}
+		for _, player in Players:GetPlayers() do security:sample(player, timestamp); table.insert(ids, player.UserId) end
+		for player, hold in holds do
+			local dest = world.destinations[hold.destination]
+			if not orders or hold.index ~= orders.index or not dest or not playerStates:canAct(player) or not inRange(player, dest) then holds[player] = nil end
+		end
+		table.sort(ids)
+		local oldPhase = model.phase
+		local changed = model:tick(timestamp, ids)
+		if model.phase ~= "PLAYING" and oldPhase == "PLAYING" then monsters:stop(); playerStates:clearRound() end
+		if model.phase == "PREPARING" and oldPhase == "WAITING" then
+			orders = OrderModel.new(Config.Orders, Planner.create(model.roundId, Catalog.FakeHouses))
+			orders:advance(timestamp + Config.Round.Preparing)
+			for _, player in Players:GetPlayers() do player:SetAttribute("RoundReward", 0) end
+			table.clear(holds)
+		elseif model.phase == "WAITING" and oldPhase ~= "WAITING" then orders = nil; table.clear(holds) end
+		if model.phase == "PLAYING" and orders then
+			local oldStage, previousHolder = orders.stage, orders.holder
+			if orders:tick(timestamp, ghostHolderValid()) then
+				changed = true
+				if orders.stage == "COOLDOWN" and oldStage == "HOLDING" then
+					feedback("유령이 쫓아옵니다! 도망친 뒤 다시 노크하세요")
+					chase("Ghost", if previousHolder then Players:GetPlayerByUserId(previousHolder) else nil, "ghost_house")
+				elseif orders.stage == "CALM" then
+					feedback("거인이 나왔습니다! 도망치거나 현관에서 진정시키세요")
+					local nearest, distance = nil, math.huge
+					for _, candidate in Players:GetPlayers() do
+						if playerStates:canChase(candidate) then
+							local root = playerStates:root(candidate)
+							local d = (root.Position - world.destinations.giant_house.target).Magnitude
+							if d < distance then nearest, distance = candidate, d end
+						end
+					end
+					chase("Giant", nearest, "giant_house")
+				end
+				flushOutcome()
+			end
+		end
+		if changed then publish() end
+	end))
+	publish()
+	return function()
+		for _, connection in connections do connection:Disconnect() end
+		monsters:destroy()
+		playerStates:destroy()
+		remotes.Snapshot.OnServerInvoke = nil
+		for _, dest in world.destinations do dest.prompt.Enabled = false end
+	end
+end
+return RoundService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="19">
+          <Properties>
+            <string name="Name">SecurityService</string>
+            <string name="Source"><![CDATA[--!strict
+local Security = {}
+Security.__index = Security
+type Record = { character: Model, position: Vector3, time: number, blockedUntil: number }
+type State = { records: { [Player]: Record }, requests: { [Player]: number }, interactions: { [Player]: number } }
+type Service = typeof(setmetatable({} :: State, Security))
+
+function Security.new(): Service
+	return setmetatable({ records = {}, requests = {}, interactions = {} }, Security)
+end
+
+function Security.remove(self: Service, player: Player)
+	self.records[player], self.requests[player], self.interactions[player] = nil, nil, nil
+end
+
+function Security.allowSnapshot(self: Service, player: Player, now: number): boolean
+	local last = self.requests[player] or -math.huge
+	if now - last < 1 then return false end
+	self.requests[player] = now
+	return true
+end
+
+function Security.sample(self: Service, player: Player, now: number)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
+		self.records[player] = nil
+		return
+	end
+	local position = root.Position
+	-- NaN/Infinity가 거리 비교를 우회하지 못하도록 위치를 먼저 검사한다.
+	if position.X ~= position.X or position.Y ~= position.Y or position.Z ~= position.Z
+		or math.abs(position.X) > 1e6 or math.abs(position.Y) > 1e6 or math.abs(position.Z) > 1e6 then
+		self.records[player] = nil
+		return
+	end
+	local record = self.records[player]
+	if not record or record.character ~= character then
+		self.records[player] = { character = character, position = position, time = now, blockedUntil = now + 2 }
+		return
+	end
+	-- P1은 도보 전용. 차량 도입 시 실제 서버 승인 이동 모드에 맞게 교체해야 한다.
+	local delta = position - record.position
+	local horizontal = Vector3.new(delta.X, 0, delta.Z).Magnitude
+	if horizontal > 28 * (now - record.time) + 8 then record.blockedUntil = now + 3 end
+	record.position, record.time = position, now
+end
+
+function Security.canDeliver(self: Service, player: Player, target: Vector3, maxDistance: number, now: number, cooldown: number): boolean
+	local record = self.records[player]
+	if not record or now < record.blockedUntil then return false end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then return false end
+	local distance = (root.Position - target).Magnitude
+	if distance ~= distance or distance > maxDistance then return false end
+	if now - (self.interactions[player] or -math.huge) < cooldown then return false end
+	self.interactions[player] = now
+	return true
+end
+
+return Security
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="Folder" referent="20">
+        <Properties>
+          <string name="Name">World</string>
+        </Properties>
+        <Item class="ModuleScript" referent="21">
+          <Properties>
+            <string name="Name">BuildingFactory</string>
+            <string name="Source"><![CDATA[--!strict
+local P = require(script.Parent.Primitives)
+local Factory = {}
+local navy, orange = Color3.fromRGB(27, 39, 64), Color3.fromRGB(255, 170, 69)
+
+function Factory.house(parent: Instance, id: string, origin: Vector3, color: Color3, style: any?): (Model, Part)
+	local model = Instance.new("Model")
+	model.Name = id
+	model:SetAttribute("DestinationId", id)
+	model.Parent = parent
+	style = style or {}
+	local cf = CFrame.new(origin)
+	P.part(model, "Foundation", Vector3.new(38, 1, 32), cf * CFrame.new(0, 0.5, 0), navy)
+	P.part(model, "Walls", Vector3.new(32, 19, 26), cf * CFrame.new(0, 10.5, 0), Color3.fromRGB(66, 72, 98))
+	P.part(model, "Roof", Vector3.new(39, 4, 34), cf * CFrame.new(0, 22, 0) * CFrame.Angles(0, 0, math.rad(-5)), color)
+	local door = P.part(model, "Door", Vector3.new(if id == "giant_house" then 10 else 6, if id == "giant_house" then 15 else 10, 0.6), cf * CFrame.new(0, if id == "giant_house" then 8.5 else 6, -13.5), navy)
+	P.part(model, "DoorTrim", Vector3.new(8, 0.4, 0.7), cf * CFrame.new(0, 11.4, -13.7), color, Enum.Material.Neon)
+	P.part(model, "Porch", Vector3.new(14, 0.5, 8), cf * CFrame.new(0, 0.7, -17), Color3.fromRGB(102, 104, 123))
+	for _, x in { -10, 10 } do
+		P.part(model, "Window", Vector3.new(5, 6, 0.4), cf * CFrame.new(x, 11, -13.4), Color3.fromRGB(170, 139, 255), Enum.Material.Neon)
+		P.part(model, "WindowBar", Vector3.new(0.35, 6.4, 0.6), cf * CFrame.new(x, 11, -13.7), navy)
+	end
+	P.part(model, "MailPost", Vector3.new(0.8, 4, 0.8), cf * CFrame.new(11, 2, -23), navy)
+	P.part(model, "StarMailbox", Vector3.new(3, 2, 2), cf * CFrame.new(11, 4.5, -23), style.mailboxColor or orange)
+	P.sign(model, style.label or (id == "ghost_house" and "01 · 파란 지붕집" or "02 · 거인의 집"), cf * CFrame.new(0, if id == "giant_house" then 18 else 16, -13.6), Vector3.new(17, 3, 0.4), color)
+	if style.symbol then
+		P.sign(model, style.symbol, cf * CFrame.new(11, 4.5, -24.1), Vector3.new(3, 2, 0.2), Color3.new(1, 1, 1))
+	end
+	P.part(model, "PorchLamp", Vector3.new(2, 1, 1), cf * CFrame.new(0, 12.5, -14), style.lampColor or orange, Enum.Material.Neon)
+	return model, door
+end
+
+function Factory.headquarters(parent: Instance, origin: Vector3)
+	local model = Instance.new("Model")
+	model.Name, model.Parent = "Headquarters", parent
+	local cf = CFrame.new(origin) * CFrame.Angles(0, math.pi, 0)
+	P.part(model, "Floor", Vector3.new(64, 1, 40), cf * CFrame.new(0, 0.5, 0), navy)
+	P.part(model, "BackWall", Vector3.new(64, 20, 2), cf * CFrame.new(0, 11, 19), navy)
+	for _, x in { -31, 31 } do
+		P.part(model, "SideWall", Vector3.new(2, 20, 40), cf * CFrame.new(x, 11, 0), navy)
+	end
+	P.part(model, "Roof", Vector3.new(70, 2, 46), cf * CFrame.new(0, 22, 0), navy)
+	P.part(model, "NeonAwning", Vector3.new(70, 0.6, 1), cf * CFrame.new(0, 21, -23), orange, Enum.Material.Neon)
+	P.part(model, "Counter", Vector3.new(35, 4, 6), cf * CFrame.new(0, 3, 8), Color3.fromRGB(160, 88, 52))
+	P.sign(model, "야식 본부 / MIDNIGHT", cf * CFrame.new(0, 17, -21), Vector3.new(54, 6, 0.6), orange)
+	P.sign(model, "접수 / 주문카드를 확인하세요", cf * CFrame.new(0, 8, 4.8), Vector3.new(30, 3, 0.5), Color3.fromRGB(99, 216, 232))
+	for index = 1, 4 do
+		local x = (index - 2.5) * 10
+		P.part(model, "ParkingBay", Vector3.new(8, 0.12, 12), cf * CFrame.new(x, 1.1, -10), Color3.fromRGB(48, 62, 83))
+	end
+end
+
+return Factory
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="22">
+          <Properties>
+            <string name="Name">MonsterFactory</string>
+            <string name="Source"><![CDATA[--!strict
+local P = require(script.Parent.Primitives)
+local Factory = {}
+
+function Factory.create(parent: Instance, kind: string, position: Vector3)
+	local model = Instance.new("Model")
+	model.Name = "Midnight" .. kind
+	local giant, house = kind == "Giant", kind == "Fake"
+	local color = if giant then Color3.fromRGB(255, 175, 90) elseif house then Color3.fromRGB(156, 112, 207) else Color3.fromRGB(130, 215, 255)
+	local root = P.part(model, "HumanoidRootPart", Vector3.new(3, 4, 3), CFrame.new(position), color)
+	root.Transparency, root.CanCollide = 1, false
+	local body = P.part(model, "Torso", if giant then Vector3.new(7, 8, 5) elseif house then Vector3.new(7, 6, 6) else Vector3.new(4, 5, 4), CFrame.new(position), color)
+	body.CanCollide = true
+	if not giant and not house then body.Shape, body.Transparency = Enum.PartType.Ball, 0.2 end
+	local head = P.part(model, "Head", Vector3.new(4, 3, 3), CFrame.new(position + Vector3.new(0, 4.5, 0)), color)
+	head.Shape = Enum.PartType.Ball
+	for _, x in { -0.9, 0.9 } do
+		local eye = P.part(model, "Eye", Vector3.new(0.6, 0.8, 0.35), CFrame.new(position + Vector3.new(x, 4.8, -1.5)), Color3.fromRGB(27, 39, 64), Enum.Material.Neon)
+		eye.CanCollide = false
+	end
+	P.part(model, "Smile", Vector3.new(1.7, 0.25, 0.3), CFrame.new(position + Vector3.new(0, 3.8, -1.5)), Color3.fromRGB(27, 39, 64))
+	if house then
+		P.part(model, "Roof", Vector3.new(9, 2, 8), CFrame.new(position + Vector3.new(0, 3.5, 0)), Color3.fromRGB(80, 60, 122))
+		for _, x in { -2, 2 } do P.part(model, "Foot", Vector3.new(2.4, 1.5, 4), CFrame.new(position + Vector3.new(x, -3.5, 0)), color) end
+	elseif giant then
+		for _, x in { -4.5, 4.5 } do P.part(model, "Arm", Vector3.new(2, 6, 2), CFrame.new(position + Vector3.new(x, 0, 0)), color) end
+	else
+		for _, x in { -1.4, 0, 1.4 } do
+			P.part(model, "GhostTail", Vector3.new(1.2, 2, 1.5), CFrame.new(position + Vector3.new(x, -2.3, 0)), color)
+		end
+	end
+	local humanoid = Instance.new("Humanoid")
+	humanoid.RequiresNeck, humanoid.BreakJointsOnDeath, humanoid.DisplayDistanceType = false, false, Enum.HumanoidDisplayDistanceType.None
+	humanoid.WalkSpeed, humanoid.HipHeight, humanoid.Parent = if giant then 19 else 20, if giant or house then 3 else 2, model
+	model.PrimaryPart = root
+	-- 모든 장식은 한 물리 어셈블리에 용접한다. 외부 리그/애니메이션 ID에 의존하지 않는다.
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored, part.CanTouch = false, false
+			if part ~= root then
+				part.Massless = true
+				if part ~= body then part.CanCollide = false end
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0, weld.Part1, weld.Parent = root, part, root
+			end
+		end
+	end
+	model.Parent = parent
+	return { model = model, root = root, humanoid = humanoid }
+end
+return Factory
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="23">
+          <Properties>
+            <string name="Name">NavigationSigns</string>
+            <string name="Source"><![CDATA[--!strict
+local P = require(script.Parent.Primitives)
+local Navigation = {}
+
+function Navigation.create(parent: Instance, name: string, position: Vector3, target: Vector3, color: Color3)
+	local model = Instance.new("Model")
+	model.Name, model.Parent = name, parent
+	local flat = Vector3.new(target.X, position.Y, target.Z)
+	-- 문자 화살표는 보는 면에 따라 반대로 보인다. 실제 목적지 방향의 3D 화살표를 만든다.
+	local delta = flat - position
+	local yaw = math.atan2(-delta.X, -delta.Z)
+	local frame = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+	model:SetAttribute("TargetPosition", target)
+	local shaft = P.part(model, "ArrowShaft", Vector3.new(0.7, 0.2, 8), frame, color, Enum.Material.Neon)
+	shaft.CanCollide = false
+	for _, side in { -1, 1 } do
+		local head = P.part(model, "ArrowHead", Vector3.new(0.7, 0.2, 4), frame * CFrame.new(side * 1.2, 0, -3) * CFrame.Angles(0, side * math.rad(40), 0), color, Enum.Material.Neon)
+		head.CanCollide = false
+	end
+	P.sign(model, "01 · 파란 지붕집", CFrame.new(position + Vector3.new(0, 6, 0)), Vector3.new(22, 4, 0.6), color, true)
+	return model
+end
+return Navigation
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="24">
+          <Properties>
+            <string name="Name">Primitives</string>
+            <string name="Source"><![CDATA[--!strict
+local Primitives = {}
+
+function Primitives.part(parent: Instance, name: string, size: Vector3, frame: CFrame, color: Color3, material: Enum.Material?): Part
+	local part = Instance.new("Part")
+	part.Name, part.Size, part.CFrame = name, size, frame
+	part.Color, part.Material = color, material or Enum.Material.SmoothPlastic
+	part.Anchored = true
+	part.TopSurface, part.BottomSurface = Enum.SurfaceType.Smooth, Enum.SurfaceType.Smooth
+	part.Parent = parent
+	return part
+end
+
+function Primitives.sign(parent: Instance, text: string, frame: CFrame, size: Vector3, color: Color3, doubleSided: boolean?): Part
+	local part = Primitives.part(parent, "Sign", size, frame, Color3.fromRGB(17, 25, 44))
+	local surface = Instance.new("SurfaceGui")
+	surface.Face, surface.PixelsPerStud = Enum.NormalId.Front, 36
+	surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	surface.Parent = part
+	local label = Instance.new("TextLabel")
+	label.Size, label.BackgroundTransparency = UDim2.fromScale(1, 1), 1
+	label.Text, label.TextColor3, label.TextScaled = text, color, true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = surface
+	if doubleSided then
+		local back = surface:Clone()
+		back.Face, back.Parent = Enum.NormalId.Back, part
+	end
+	return part
+end
+
+return Primitives
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="25">
+          <Properties>
+            <string name="Name">WorldBuilder</string>
+            <string name="Source"><![CDATA[--!strict
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage.Shared.Config)
+local P = require(script.Parent.Primitives)
+local Building = require(script.Parent.BuildingFactory)
+local Navigation = require(script.Parent.NavigationSigns)
+local Catalog = require(ReplicatedStorage.Shared.OrderCatalog)
+local WorldBuilder = {}
+local cyan = Color3.fromRGB(99, 216, 232)
+
+function WorldBuilder.build()
+	local old = workspace:FindFirstChild("GameWorld")
+	if old and old:GetAttribute("MidnightGenerated") ~= true then
+		error("GameWorld already exists and is not generated by Midnight Delivery; rename it first")
+	end
+	-- 기존 월드는 새 월드 생성 성공 후에만 교체한다. 라운드마다 맵을 다시 만들지 않는다.
+	local world = Instance.new("Folder")
+	world.Name = "GameWorld"
+	world:SetAttribute("MidnightGenerated", true)
+	world:SetAttribute("Seed", Config.Map.Seed)
+	local ok, result = pcall(function()
+		local folders = {} :: { [string]: Folder }
+		for _, name in { "Lobby", "Roads", "Buildings", "Trees", "DeliveryPoints", "NPCs", "Vehicles", "Effects" } do
+			local folder = Instance.new("Folder")
+			folder.Name, folder.Parent = name, world
+			folders[name] = folder
+		end
+		P.part(world, "Ground", Vector3.new(Config.Map.Size, 4, Config.Map.Size), CFrame.new(0, -2, 0), Color3.fromRGB(28, 45, 43), Enum.Material.Grass)
+		local roads = folders.Roads
+		P.part(roads, "MainRoad", Vector3.new(30, 0.2, 400), CFrame.new(0, 0.1, 25), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
+		P.part(roads, "DeliveryRoad", Vector3.new(250, 0.2, 30), CFrame.new(-105, 0.12, -20), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
+		for z = -95, 210, 24 do
+			P.part(roads, "CenterMark", Vector3.new(0.5, 0.05, 9), CFrame.new(0, 0.24, z), Color3.fromRGB(255, 213, 137))
+		end
+		for x = -210, -25, 24 do
+			P.part(roads, "CenterMark", Vector3.new(9, 0.05, 0.5), CFrame.new(x, 0.26, -20), Color3.fromRGB(255, 213, 137))
+		end
+		Building.headquarters(folders.Lobby, Config.Map.Headquarters)
+		local destinations = {}
+		local function destination(id, position, color, style)
+			local house, door = Building.house(folders.Buildings, id, position, color, style)
+			house:SetAttribute("CustomerType", if id == "ghost_house" then "Ghost" elseif id == "giant_house" then "Giant" else "Fake")
+			local marker = Instance.new("Attachment")
+			marker.Name, marker.Position, marker.Parent = "InteractPoint", Vector3.new(0, 0, -3), door
+			local prompt = Instance.new("ProximityPrompt")
+			prompt.Name, prompt.ActionText, prompt.ObjectText = "Deliver", "야식 배달", style and style.label or id
+			prompt.HoldDuration, prompt.MaxActivationDistance = 0.6, Config.Delivery.Distance
+			prompt.RequiresLineOfSight, prompt.Enabled, prompt.Parent = true, false, marker
+			destinations[id] = { prompt = prompt, target = door.CFrame:PointToWorldSpace(marker.Position), door = door }
+		end
+		destination("ghost_house", Config.Map.GhostHouse, Color3.fromRGB(63, 112, 228), { label = "01 · 파란 지붕집" })
+		destination("giant_house", Config.Map.GiantHouse, Color3.fromRGB(255, 170, 69), { label = "02 · 거인의 집" })
+		for i, info in Catalog.FakeHouses do
+			destination(info.id, Vector3.new(-90 + i * 55, 0, 255), Color3.fromRGB(170, 139, 255), {
+				label = info.label, symbol = info.symbol,
+				mailboxColor = Color3.fromRGB(table.unpack(info.mailbox)), lampColor = Color3.fromRGB(table.unpack(info.lamp)),
+			})
+		end
+		P.part(roads, "GiantRoad", Vector3.new(200, 0.2, 30), CFrame.new(100, 0.12, 120), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
+		P.part(roads, "OuterRoad", Vector3.new(180, 0.2, 30), CFrame.new(20, 0.12, 230), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
+		local spawn = Instance.new("SpawnLocation")
+		spawn.Name, spawn.Size, spawn.CFrame = "LobbySpawn", Vector3.new(16, 1, 10), CFrame.new(Config.Map.Spawn) * CFrame.Angles(0, math.pi, 0)
+		spawn.Anchored, spawn.Neutral, spawn.Duration = true, true, 3
+		spawn.Color, spawn.Material = cyan, Enum.Material.Neon
+		spawn.Parent = folders.Lobby
+		for z = -105, 195, 60 do
+			local base = Vector3.new(21, 0, z)
+			P.part(roads, "LampPost", Vector3.new(1, 19, 1), CFrame.new(base + Vector3.new(0, 9.5, 0)), Color3.fromRGB(48, 56, 76))
+			local lamp = P.part(roads, "Lamp", Vector3.new(5, 0.7, 3), CFrame.new(base + Vector3.new(-2, 19, 0)), Color3.fromRGB(255, 213, 137), Enum.Material.Neon)
+			local light = Instance.new("PointLight")
+			light.Brightness, light.Range, light.Color, light.Parent = 1.2, 32, lamp.Color, lamp
+		end
+		Navigation.create(roads, "BlueHouseGuide", Vector3.new(0, 0.5, -20), destinations.ghost_house.target, cyan)
+		local random = Random.new(Config.Map.Seed)
+		for i = 1, 55 do
+			local x, z = random:NextNumber(-300, -245), random:NextNumber(-250, 290)
+			if i % 2 == 0 then x = -x end
+			local h = random:NextNumber(15, 27)
+			P.part(folders.Trees, "Trunk", Vector3.new(3, h, 3), CFrame.new(x, h / 2, z), Color3.fromRGB(49, 39, 47))
+			local crown = P.part(folders.Trees, "Canopy", Vector3.new(16, 18, 16), CFrame.new(x, h, z), Color3.fromRGB(31, 65, 60))
+			crown.Shape, crown.CanCollide = Enum.PartType.Ball, false
+		end
+		return { world = world, spawn = spawn, destinations = destinations, fakeCenter = Vector3.new(20, 6, 235),
+			prompt = destinations.ghost_house.prompt, target = destinations.ghost_house.target }
+	end)
+	if not ok then
+		world:Destroy()
+		error("World generation failed; seed=" .. Config.Map.Seed .. ": " .. tostring(result))
+	end
+	if old then old:Destroy() end
+	world.Parent = workspace
+	Lighting.ClockTime, Lighting.Brightness = 0.7, 2
+	Lighting.Ambient, Lighting.OutdoorAmbient = Color3.fromRGB(73, 77, 112), Color3.fromRGB(65, 75, 107)
+	Lighting.FogColor, Lighting.FogStart, Lighting.FogEnd = Color3.fromRGB(32, 40, 68), 170, 650
+	local bloom = Lighting:FindFirstChild("MidnightBloom")
+	if bloom then bloom:Destroy() end
+	local effect = Instance.new("BloomEffect")
+	effect.Name, effect.Intensity, effect.Size, effect.Threshold = "MidnightBloom", 0.18, 20, 1.4
+	effect.Parent = Lighting
+	print("[MidnightDelivery] World ready; seed=" .. Config.Map.Seed)
+	return result
+end
+
+return WorldBuilder
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="SoundService" referent="26">
+    <Properties>
+      <string name="Name">SoundService</string>
+      <bool name="RespectFilteringEnabled">true</bool>
+    </Properties>
+  </Item>
+  <Item class="StarterPlayer" referent="27">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="28">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="Folder" referent="29">
+        <Properties>
+          <string name="Name">Client</string>
+        </Properties>
+        <Item class="LocalScript" referent="30">
+          <Properties>
+            <string name="Name">Bootstrap</string>
+            <string name="Source"><![CDATA[--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Names = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RemoteNames"))
+local HUD = require(script.Parent.Controllers.HUDController)
+local hud = HUD.start()
+local stopSpawn = require(script.Parent.Controllers.SpawnController).start()
+local folder = ReplicatedStorage:WaitForChild(Names.Folder, 30)
+if not folder then
+	hud.feedback("서버 초기화 실패 · Studio Output을 확인하세요")
+	error("MidnightDelivery: Remotes unavailable after 30 seconds")
+end
+local stateRemote = folder:WaitForChild(Names.State)
+local feedbackRemote = folder:WaitForChild(Names.Feedback)
+local snapshotRemote = folder:WaitForChild(Names.Snapshot)
+local stateConnection = stateRemote.OnClientEvent:Connect(hud.update)
+local feedbackConnection = feedbackRemote.OnClientEvent:Connect(hud.feedback)
+-- 이벤트를 먼저 구독하여 초기 스냅샷 도중 발생한 상태 전환을 놓치지 않는다.
+task.spawn(function()
+	for attempt = 1, 3 do
+		local ok, snapshot = pcall(function() return snapshotRemote:InvokeServer() end)
+		if ok and snapshot then hud.update(snapshot); return end
+		task.wait(1.1)
+	end
+	hud.feedback("상태 동기화 실패 · 다시 입장하세요")
+end)
+script.Destroying:Connect(function()
+	stateConnection:Disconnect()
+	feedbackConnection:Disconnect()
+	hud.destroy()
+	stopSpawn()
+end)
+print("[MidnightDelivery] Client GUI ready (P3)")
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="Folder" referent="31">
+          <Properties>
+            <string name="Name">Controllers</string>
+          </Properties>
+          <Item class="ModuleScript" referent="32">
+            <Properties>
+              <string name="Name">HUDController</string>
+              <string name="Source"><![CDATA[--!strict
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
+local Strings = require(Shared:WaitForChild("Strings"))
+local Types = require(Shared:WaitForChild("Types"))
+local Factory = require(script.Parent.Parent.UI.UIFactory)
+local HUD = {}
+
+function HUD.start()
+	local player = Players.LocalPlayer
+	local ui = Factory.create(player:WaitForChild("PlayerGui"))
+	local state: Types.Snapshot? = nil
+	local collapsed, toastUntil = false, 0
+	local connections = {}
+	local function render()
+		if not state then return end
+		ui.phase.Text = Strings[state.phase] or state.phase
+		ui.stats.Text = string.format("%d Coins  ·  %d XP  ·  팀 %d/4", state.coins, state.xp, state.playerCount)
+		if state.phase == "RESULTS" then
+			ui.title.Text = state.result
+			ui.hint.Text = string.format("성공 %d / 실패 %d · +%d Coins\n잠시 후 다음 배달을 준비합니다.", state.successes, state.failures, state.reward)
+		elseif not state.participant and state.phase ~= "WAITING" then
+			ui.title.Text, ui.hint.Text = "로비 대기", Strings.Spectator
+		elseif state.phase == "PLAYING" or state.phase == "PREPARING" then
+			ui.title.Text, ui.hint.Text = state.orderTitle, state.orderHint
+		else
+			ui.title.Text, ui.hint.Text = Strings.Title, "자동으로 시작합니다.\n주문 확인 → 네온 길 따라 이동 → 현관 배달"
+		end
+		ui.hint.Visible = not collapsed
+		ui.card.Size = UDim2.fromOffset(math.min(300, math.max(190, ui.root.AbsoluteSize.X - 140)), if collapsed then 42 else 142)
+		ui.stats.Position = UDim2.fromOffset(16, if collapsed then 134 else 234)
+		ui.note.Position = UDim2.fromOffset(16, if collapsed then 160 else 260)
+		ui.toggle.Text = if collapsed then "주문 펼치기" else "주문 접기"
+	end
+	table.insert(connections, ui.toggle.Activated:Connect(function() collapsed = not collapsed; render() end))
+	table.insert(connections, ui.root:GetPropertyChangedSignal("AbsoluteSize"):Connect(render))
+	local elapsed = 0
+	table.insert(connections, RunService.RenderStepped:Connect(function(delta)
+		elapsed += delta
+		if elapsed < 0.1 then return end
+		elapsed = 0
+		local now = workspace:GetServerTimeNow()
+		if now > toastUntil then ui.toast.Text = "" end
+		if not state then return end
+		if state.downUntil > now then
+			ui.recovery.Text = string.format("기절 · %d초 후 자동 복귀\n팀원이 3초간 눌러 구조할 수 있습니다", math.ceil(state.downUntil - now))
+		elseif state.protectedUntil > now then ui.recovery.Text = string.format("보호 중 · %d초", math.ceil(state.protectedUntil - now))
+		elseif state.chase.endsAt > now then
+			ui.recovery.Text = if state.chase.targetId == player.UserId then "괴물이 쫓아옵니다! 도로를 따라 도망치세요" else "팀원이 추격당하고 있습니다!"
+		else ui.recovery.Text = "" end
+		local members = {}
+		for _, member in state.members do table.insert(members, member.name .. (if member.downUntil > now then " · 구조 필요" else " · 정상")) end
+		ui.team.Text = table.concat(members, "  /  ")
+		if state.phase == "PLAYING" and state.participant then
+			local detail = state.orderHint
+			if state.stage == "HOLDING" then detail = string.format("문을 향한 채 그대로! %d초", math.max(0, math.ceil(state.holdUntil - now)))
+			elseif state.stage == "COOLDOWN" then detail = string.format("규칙 위반 · %d초 후 재시도", math.max(0, math.ceil(state.cooldownUntil - now)))
+			elseif state.late then detail = "음식이 식었습니다 · 현관에서 3초간 진정시키기"
+			elseif state.hotUntil > 0 then detail = string.format("음식 온도 %d%% · 식기 전에 현관으로!", math.clamp(math.ceil((state.hotUntil - now) / 90 * 100), 0, 100))
+			elseif string.find(state.orderTitle, "유령") then detail = string.format("노크 %d/3 · 세 번째 노크 후 4초 정면 유지", state.knocks) end
+			ui.hint.Text = detail .. string.format("\n주문 남은 시간 %d초", math.max(0, math.ceil(state.orderEndsAt - now)))
+			ui.phase.Text = string.format("배달 %d/3 · 성공 %d", state.orderIndex, state.successes)
+		end
+		local seconds = math.max(0, math.ceil(state.endsAt - now))
+		ui.timer.Text = if state.endsAt == 0 then "대기" else string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		local camera = workspace.CurrentCamera
+		local active = state.participant and state.orderActive and root ~= nil and camera ~= nil
+		ui.arrow.Visible, ui.distance.Visible = active, active
+		if not active or not root or not root:IsA("BasePart") or not camera then return end
+		local target = state.target
+		if not target then return end
+		local projected, onScreen = camera:WorldToViewportPoint(target)
+		-- 뒤쪽 목표는 투영 방향을 반전해 화면 가장자리에 안내한다.
+		local center = ui.root.AbsoluteSize / 2
+		local localPoint = Vector2.new(projected.X, projected.Y) - ui.root.AbsolutePosition
+		local direction = localPoint - center
+		if projected.Z < 0 then direction = -direction end
+		if direction.Magnitude < 1 then direction = Vector2.new(0, -1) end
+		local unit = direction.Unit
+		local limit = Vector2.new(math.max(40, center.X - 40), math.max(40, center.Y - 50))
+		local radius = math.min(limit.X / math.max(math.abs(unit.X), 0.001), limit.Y / math.max(math.abs(unit.Y), 0.001))
+		local point = if onScreen then localPoint else center + unit * radius
+		point = Vector2.new(math.clamp(point.X, 32, center.X * 2 - 32), math.clamp(point.Y, 84, center.Y * 2 - 50))
+		ui.arrow.Position, ui.arrow.Rotation = UDim2.fromOffset(point.X, point.Y), math.deg(math.atan2(unit.Y, unit.X)) + 90
+		ui.distance.Position = UDim2.fromOffset(math.clamp(point.X, 105, math.max(105, center.X * 2 - 105)), point.Y + 22)
+		ui.distance.Text = string.format("목적지 · %d studs", math.floor((root.Position - target).Magnitude))
+	end))
+	ui.arrow.Visible, ui.distance.Visible = false, false
+	return {
+		update = function(snapshot: Types.Snapshot?)
+			if not snapshot or (state and snapshot.version < state.version) then return end
+			state = snapshot
+			render()
+		end,
+		feedback = function(message: string)
+			ui.toast.Text, toastUntil = message, workspace:GetServerTimeNow() + 4
+		end,
+		destroy = function()
+			for _, connection in connections do connection:Disconnect() end
+			ui.gui:Destroy()
+		end,
+	}
+end
+
+return HUD
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="33">
+            <Properties>
+              <string name="Name">SpawnController</string>
+              <string name="Source"><![CDATA[--!strict
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Controller = {}
+function Controller.start()
+	local player = Players.LocalPlayer
+	local stopped = false
+	local function orient(character: Model)
+		task.spawn(function()
+			local root = character:WaitForChild("HumanoidRootPart", 10)
+			local humanoid = character:WaitForChild("Humanoid", 10)
+			if not root or not root:IsA("BasePart") or not humanoid or not humanoid:IsA("Humanoid") then return end
+			local deadline = os.clock() + 5
+			while not stopped and player.Character == character and not character:GetAttribute("MidnightSpawnReady") and os.clock() < deadline do task.wait(0.05) end
+			if stopped or player.Character ~= character or not character:GetAttribute("MidnightSpawnReady") then return end
+			RunService.RenderStepped:Wait()
+			if stopped or player.Character ~= character then return end
+			local camera = workspace.CurrentCamera
+			if not camera then return end
+			local forward = Vector3.new(0, 0, 1)
+			camera.CameraType, camera.CameraSubject = Enum.CameraType.Custom, humanoid
+			-- 새 캐릭터마다 한 번만 초기 방향을 잡고 즉시 Roblox 기본 카메라에 조작을 돌려준다.
+			camera.CFrame = CFrame.lookAt(root.Position - forward * 14 + Vector3.new(0, 7, 0), root.Position + forward * 12 + Vector3.new(0, 3, 0))
+		end)
+	end
+	local connection = player.CharacterAdded:Connect(orient)
+	if player.Character then orient(player.Character) end
+	return function() stopped = true; connection:Disconnect() end
+end
+return Controller
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+        <Item class="Folder" referent="34">
+          <Properties>
+            <string name="Name">UI</string>
+          </Properties>
+          <Item class="ModuleScript" referent="35">
+            <Properties>
+              <string name="Name">Theme</string>
+              <string name="Source"><![CDATA[--!strict
+return table.freeze({
+	Background = Color3.fromRGB(17, 25, 44), Panel = Color3.fromRGB(27, 39, 64),
+	Text = Color3.fromRGB(246, 244, 235), Muted = Color3.fromRGB(178, 191, 212),
+	Orange = Color3.fromRGB(255, 170, 69), Cyan = Color3.fromRGB(99, 216, 232),
+})
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="36">
+            <Properties>
+              <string name="Name">UIFactory</string>
+              <string name="Source"><![CDATA[--!strict
+local Theme = require(script.Parent.Theme)
+local Strings = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Strings"))
+local Factory = {}
+
+local function label(parent: Instance, name: string, text: string, position: UDim2, size: UDim2, fontSize: number, color: Color3?)
+	local item = Instance.new("TextLabel")
+	item.Name, item.Text, item.Position, item.Size = name, text, position, size
+	item.BackgroundTransparency, item.TextColor3, item.TextSize = 1, color or Theme.Text, fontSize
+	item.Font, item.TextWrapped = Enum.Font.GothamMedium, true
+	item.TextXAlignment = Enum.TextXAlignment.Left
+	item.Parent = parent
+	return item
+end
+
+local function panel(parent: Instance, name: string, position: UDim2, size: UDim2)
+	local item = Instance.new("Frame")
+	item.Name, item.Position, item.Size = name, position, size
+	item.BackgroundColor3, item.BackgroundTransparency, item.BorderSizePixel = Theme.Panel, 0.08, 0
+	item.Parent = parent
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius, corner.Parent = UDim.new(0, 14), item
+	local stroke = Instance.new("UIStroke")
+	stroke.Color, stroke.Transparency, stroke.Parent = Theme.Cyan, 0.65, item
+	return item
+end
+
+function Factory.create(playerGui: Instance)
+	local old = playerGui:FindFirstChild("MidnightHUD")
+	if old then old:Destroy() end
+	local gui = Instance.new("ScreenGui")
+	gui.Name, gui.ResetOnSpawn, gui.ZIndexBehavior = "MidnightHUD", false, Enum.ZIndexBehavior.Sibling
+	gui.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
+	gui.Parent = playerGui
+	local root = Instance.new("Frame")
+	root.Name, root.Size, root.BackgroundTransparency, root.Parent = "SafeRoot", UDim2.fromScale(1, 1), 1, gui
+	local header = panel(root, "Header", UDim2.new(0, 12, 0, 8), UDim2.new(1, -24, 0, 66))
+	label(header, "Brand", Strings.Subtitle, UDim2.fromOffset(14, 6), UDim2.new(0.6, 0, 0, 20), 14, Theme.Orange)
+	local phase = label(header, "Phase", "서버 연결 중…", UDim2.fromOffset(14, 28), UDim2.new(0.72, -14, 0, 30), 17)
+	local timer = label(header, "Timer", "--:--", UDim2.new(0.75, 0, 0, 15), UDim2.new(0.25, -14, 0, 40), 25, Theme.Cyan)
+	timer.TextXAlignment = Enum.TextXAlignment.Right
+	local card = panel(root, "Order", UDim2.fromOffset(12, 84), UDim2.fromOffset(300, 142))
+	local title = label(card, "Title", Strings.Title, UDim2.fromOffset(12, 10), UDim2.new(1, -24, 0, 25), 18, Theme.Orange)
+	local hint = label(card, "Hint", "주문 확인 → 길 따라 이동 → 현관 배달", UDim2.fromOffset(12, 42), UDim2.new(1, -24, 0, 76), 15)
+	local toggle = Instance.new("TextButton")
+	toggle.Text, toggle.Size, toggle.Position = "주문 접기", UDim2.fromOffset(100, 44), UDim2.new(1, -112, 0, 84)
+	toggle.Font, toggle.TextSize, toggle.TextColor3 = Enum.Font.GothamMedium, 14, Theme.Text
+	toggle.BackgroundColor3, toggle.Parent = Theme.Panel, root
+	local corner = Instance.new("UICorner"); corner.Parent = toggle
+	local stats = label(root, "Stats", "", UDim2.fromOffset(16, 234), UDim2.new(1, -32, 0, 22), 14, Theme.Orange)
+	local note = label(root, "Note", Strings.SessionOnly, UDim2.fromOffset(16, 260), UDim2.new(1, -32, 0, 34), 12, Theme.Muted)
+	local arrow = label(root, "Arrow", "▲", UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(44, 44), 32, Theme.Cyan)
+	arrow.AnchorPoint, arrow.TextXAlignment = Vector2.new(0.5, 0.5), Enum.TextXAlignment.Center
+	local distance = label(root, "Distance", "", UDim2.fromScale(0.5, 0.6), UDim2.fromOffset(210, 32), 14, Theme.Cyan)
+	distance.AnchorPoint, distance.TextXAlignment = Vector2.new(0.5, 0), Enum.TextXAlignment.Center
+	local recovery = label(root, "Recovery", "", UDim2.new(0.08, 0, 0.58, 0), UDim2.new(0.84, 0, 0, 80), 19, Theme.Orange)
+	recovery.TextXAlignment = Enum.TextXAlignment.Center
+	local team = label(root, "Team", "", UDim2.new(0, 16, 1, -65), UDim2.new(0.6, 0, 0, 50), 12, Theme.Muted)
+	local toast = label(root, "Toast", "", UDim2.new(0.1, 0, 0.72, 0), UDim2.new(0.8, 0, 0, 48), 20, Theme.Orange)
+	toast.TextXAlignment = Enum.TextXAlignment.Center
+	return { gui = gui, root = root, phase = phase, timer = timer, card = card, title = title, hint = hint,
+		toggle = toggle, stats = stats, note = note, arrow = arrow, distance = distance, toast = toast, recovery = recovery, team = team }
+end
+
+return Factory
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="37">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <bool name="FilteringEnabled">true</bool>
+      <bool name="NeedsPivotMigration">false</bool>
+    </Properties>
+  </Item>
+</roblox>

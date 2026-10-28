@@ -1,6 +1,8 @@
 --!strict
 export type Phase = "WAITING" | "PREPARING" | "PLAYING" | "RESULTS"
 export type Snapshot = {
+	downUntil: number, protectedUntil: number, members: { { name: string, downUntil: number } },
+	chase: { kind: string, targetId: number, endsAt: number },
 	version: number, phase: Phase, roundId: number, endsAt: number,
 	participant: boolean, playerCount: number, coins: number, xp: number,
 	result: string, reward: number, orderActive: boolean, target: Vector3?,

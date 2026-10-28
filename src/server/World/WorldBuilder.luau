@@ -60,7 +60,7 @@ function WorldBuilder.build()
 		P.part(roads, "GiantRoad", Vector3.new(200, 0.2, 30), CFrame.new(100, 0.12, 120), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
 		P.part(roads, "OuterRoad", Vector3.new(180, 0.2, 30), CFrame.new(20, 0.12, 230), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
 		local spawn = Instance.new("SpawnLocation")
-		spawn.Name, spawn.Size, spawn.CFrame = "LobbySpawn", Vector3.new(16, 1, 10), CFrame.new(Config.Map.Spawn)
+		spawn.Name, spawn.Size, spawn.CFrame = "LobbySpawn", Vector3.new(16, 1, 10), CFrame.new(Config.Map.Spawn) * CFrame.Angles(0, math.pi, 0)
 		spawn.Anchored, spawn.Neutral, spawn.Duration = true, true, 3
 		spawn.Color, spawn.Material = cyan, Enum.Material.Neon
 		spawn.Parent = folders.Lobby

@@ -40,6 +40,7 @@ end
 local builder = loadModule(node("src/server/World/WorldBuilder"))
 local first = builder.build()
 assert(first.spawn.ClassName == "SpawnLocation" and first.spawn.Neutral)
+assert(first.spawn.CFrame.LookVector:Dot(r.Vector3.new(0,0,1)) > 0.99, "Spawn must face the road, not headquarters")
 assert(not first.prompt.Enabled and math.abs(first.prompt.HoldDuration - 0.6) < 0.001)
 assert((first.target - r.Vector3.new(-105, 6, -1.5)).Magnitude < 0.001)
 local nav = first.world.Roads.BlueHouseGuide
@@ -59,6 +60,19 @@ assert(promptCount == 5, "Ghost, giant, and three fake houses must have independ
 local count = #first.world:GetDescendants()
 for _, instance in first.world:GetDescendants() do
 	if instance:IsA("BasePart") then assert(instance.Anchored, instance.Name) end
+end
+local monsterFactory = loadModule(node("src/server/World/MonsterFactory"))
+for _, kind in { "Ghost", "Giant", "Fake" } do
+	local actor = monsterFactory.create(first.world.NPCs, kind, r.Vector3.new(0, 7, 0))
+	assert(actor.model.PrimaryPart == actor.root and not actor.root.Anchored)
+	assert(actor.humanoid.RequiresNeck == false and actor.humanoid.WalkSpeed > 0)
+	local parts, welds = 0, 0
+	for _, instance in actor.model:GetDescendants() do
+		if instance:IsA("BasePart") then parts += 1; assert(not instance.Anchored)
+		elseif instance.ClassName == "WeldConstraint" then welds += 1 end
+	end
+	assert(welds == parts - 1, "Every monster part must belong to one welded assembly")
+	actor.model:Destroy()
 end
 local second = builder.build()
 assert(first.world.Parent == nil and second.world.Parent == workspace)
