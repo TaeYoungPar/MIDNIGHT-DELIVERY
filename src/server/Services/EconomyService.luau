@@ -1,9 +1,9 @@
 --!strict
--- P1은 세션 재화만 제공한다. 영구 저장 기능으로 오해하지 않도록 HUD에도 표시한다.
+-- 지갑은 DataService와 메모리 객체를 공유한다. 지급은 비동기 저장 콜백 밖에서 한 번만 실행한다.
 local Economy = {}
 Economy.__index = Economy
-type Profile = { coins: number, xp: number }
-type State = { profiles: { [number]: Profile }, paid: { [string]: boolean }, roundId: number }
+type Profile = { coins: number, xp: number, lifetimeDeliveries: number? }
+type State = { profiles: { [number]: Profile }, paid: { [string]: boolean }, roundId: number, canMutate: ((any) -> boolean)?, onMutation: ((any) -> ())? }
 type Service = typeof(setmetatable({} :: State, Economy))
 
 function Economy.new(): Service
@@ -23,6 +23,7 @@ function Economy.remove(self: Service, player: any)
 end
 
 function Economy.award(self: Service, player: any, roundId: number, coins: number, xp: number, orderId: number?): boolean
+	if self.canMutate and not self.canMutate(player) then return false end
 	if roundId < self.roundId then return false end
 	if roundId > self.roundId then self.roundId = roundId; table.clear(self.paid) end
 	local id = player.UserId
@@ -30,10 +31,12 @@ function Economy.award(self: Service, player: any, roundId: number, coins: numbe
 	if self.paid[key] or not self.profiles[id] then return false end
 	self.paid[key] = true
 	local profile = self.profiles[id]
-	profile.coins += coins
-	profile.xp += xp
+	profile.coins = math.min(1000000000,profile.coins + coins)
+	profile.xp = math.min(1000000000,profile.xp + xp)
+	if (orderId or 1) <= 3 then profile.lifetimeDeliveries = math.min(1000000000,(profile.lifetimeDeliveries or 0)+1) end
 	player:SetAttribute("Coins", profile.coins)
 	player:SetAttribute("XP", profile.xp)
+	if self.onMutation then self.onMutation(player) end
 	return true
 end
 

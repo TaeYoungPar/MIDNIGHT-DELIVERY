@@ -79,7 +79,15 @@ local vehicleStub = {
 	input = function() driveRequests += 1; return true end, destroy = function() end, seated = function() return false end,
 	status = function() return { owned = false, seated = false, speed = 0, resetAt = 0 } end,
 }
-local stop = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub})
+local dataStub={
+	begin=function()end,remove=function()end,tick=function()end,shutdown=function()end,touch=function()end,
+	canEarn=function()return true end,loaded=function()return true end,
+	profile=function()return{owned={},equipped={hat="",scooter="",badge=""}}end,
+	status=function()return{mode="SESSION",reason="test",dirty=false}end,
+}
+local cosmeticStub={add=function()end,remove=function()end,apply=function()end,destroy=function()end}
+local shopStub={remove=function()end,action=function()return false,"test"end}
+local stop = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub, data=dataStub, cosmetics=cosmeticStub, shop=shopStub})
 local function step(time)
 	clock = time; heartbeat:Fire(0.1)
 end
@@ -129,7 +137,7 @@ for _, dest in world.destinations do assert(not dest.prompt.Enabled) end
 assert(remotes.Snapshot.OnServerInvoke == nil)
 -- 별도 라운드에서 유령 규칙 위반과 가짜 집 오답도 실제 추격 연결을 호출해야 한다.
 clock = 500
-local stopAgain = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub})
+local stopAgain = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub, data=dataStub, cosmetics=cosmeticStub, shop=shopStub})
 step(500); step(520); step(530)
 move("ghost_house"); step(535); trigger("ghost_house"); step(536); trigger("ghost_house"); step(537); trigger("ghost_house")
 p.root.CFrame = r.CFrame.identity; step(538)

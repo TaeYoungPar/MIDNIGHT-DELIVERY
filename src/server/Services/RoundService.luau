@@ -14,6 +14,9 @@ local Monsters = require(script.Parent.MonsterService)
 local Vehicles = require(script.Parent.VehicleService)
 local Movement = require(script.Parent.MovementModel)
 local ActionLimiter = require(script.Parent.ActionLimiter)
+local Data = require(script.Parent.DataService)
+local Shop = require(script.Parent.ShopService)
+local Cosmetics = require(script.Parent.CosmeticService)
 local RoundService = {}
 type Destination = { prompt: ProximityPrompt, target: Vector3, door: Part }
 type World = { world: Folder, spawn: SpawnLocation, destinations: { [string]: Destination }, fakeCenter: Vector3 }
@@ -23,7 +26,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local model = RoundModel.new(Config.Round)
 	local orders: OrderModel.Model? = nil
 	local security, economy = Security.new(), Economy.new()
-	local playerStates, monsters, vehicles
+	local playerStates, monsters, vehicles, data, shop, cosmetics
 	local limiter = ActionLimiter.new()
 	local runners = {}
 	local version, elapsed = 0, 0
@@ -43,6 +46,10 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		local target = if spec and spec.kind == "Fake" then world.fakeCenter
 			elseif spec then world.destinations[spec.destination].target else nil
 		return {
+			level = player:GetAttribute("Level") or 1,
+			data = if data then data:status(player) else {mode="LOADING",reason="",dirty=false},
+			owned = if data and data:profile(player) then table.clone(data:profile(player).owned) else {},
+			equipped = if data and data:profile(player) then table.clone(data:profile(player).equipped) else {},
 			vehicle = if vehicles then vehicles:status(player) else { owned = false, seated = false, speed = 0, resetAt = 0 },
 			stamina = if runners[player] then runners[player].value else 5,
 			downUntil = status.downUntil, protectedUntil = status.protectedUntil, members = members,
@@ -85,6 +92,15 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	vehicles = if dependencies and dependencies.vehicles then dependencies.vehicles else Vehicles.new(world.world:FindFirstChild("Vehicles"), playerStates, canRide, publish,
 		function(player) security:authorizePosition(player, now()) end)
 	playerStates.beforeDown = function(player) vehicles:exit(player) end
+	local function dataChanged(player)
+		if cosmetics then cosmetics:apply(player) end
+		publish()
+	end
+	data = if dependencies and dependencies.data then dependencies.data else Data.new(economy,dataChanged)
+	economy.canMutate = function(player) return data:canEarn(player) end
+	economy.onMutation = function(player) data:touch(player) end
+	cosmetics = if dependencies and dependencies.cosmetics then dependencies.cosmetics else Cosmetics.new(data,vehicles)
+	shop = if dependencies and dependencies.shop then dependencies.shop else Shop.new(data,function(player)cosmetics:apply(player)end)
 	local function chase(kind, player, destinationId)
 		local destination = world.destinations[destinationId]
 		if destination and player then monsters:start(kind, player, destination.target + Vector3.new(0, 0, -10)) end
@@ -121,12 +137,14 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		player:SetAttribute("RoundReward", 0)
 		player:SetAttribute("Stamina", 5)
 		playerStates:add(player)
+		cosmetics:add(player)
+		data:begin(player)
 		publish()
 	end
 	for _, player in Players:GetPlayers() do add(player) end
 	table.insert(connections, Players.PlayerAdded:Connect(add))
 	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
-		model:remove(player.UserId); security:remove(player); economy:remove(player); vehicles:remove(player); playerStates:remove(player)
+		model:remove(player.UserId); security:remove(player); data:remove(player); cosmetics:remove(player); shop:remove(player); economy:remove(player); vehicles:remove(player); playerStates:remove(player)
 		runners[player] = nil; limiter:remove(player.UserId)
 		holds[player] = nil
 		task.defer(publish)
@@ -140,6 +158,10 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		if payload.kind == "VehicleInput" then vehicles:input(player, payload.throttle, payload.steer)
 		elseif payload.kind == "ResetVehicle" then vehicles:reset(player, true); publish()
 		elseif payload.kind == "ExitVehicle" then vehicles:exit(player); publish()
+		elseif payload.kind=="PurchaseWithCoins" or payload.kind=="EquipCosmetic" then
+			if not playerStates:canAct(player) or vehicles:seated(player) then remotes.Feedback:FireClient(player,"도보 상태에서 상점을 이용하세요");return end
+			local _,message = shop:action(player,payload.kind,payload.itemId,payload.enabled)
+			remotes.Feedback:FireClient(player,message);publish()
 		elseif payload.kind == "Sprint" and typeof(payload.enabled) == "boolean" then
 			local runner = runners[player]
 			if runner then runner.wants, runner.inputAt = payload.enabled and playerStates:canAct(player), now() end
@@ -193,6 +215,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		elapsed += delta
 		if elapsed < 0.1 then return end
 		elapsed = 0
+		data:tick()
 		playerStates:tick()
 		monsters:tick()
 		local timestamp, ids = now(), {}
@@ -207,7 +230,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 				if math.abs((player:GetAttribute("Stamina") or 5) - runner.value) > 0.2 then player:SetAttribute("Stamina", runner.value) end
 				if playerStates:canAct(player) then humanoid.WalkSpeed = speed end
 			end
-			table.insert(ids, player.UserId)
+			if data:loaded(player) then table.insert(ids, player.UserId) end
 		end
 		for player, hold in holds do
 			local dest = world.destinations[hold.destination]
@@ -250,11 +273,13 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	publish()
 	return function()
 		for _, connection in connections do connection:Disconnect() end
+		cosmetics:destroy()
 		vehicles:destroy()
 		monsters:destroy()
 		playerStates:destroy()
 		remotes.Snapshot.OnServerInvoke = nil
 		for _, dest in world.destinations do dest.prompt.Enabled = false end
+		data:shutdown()
 	end
 end
 return RoundService

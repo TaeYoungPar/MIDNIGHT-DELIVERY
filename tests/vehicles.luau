@@ -27,7 +27,7 @@ local function setup()
 		local attrs={}
 		local changed=signal()
 		local actor={}
-		actor.model={SetAttribute=function(_,k,v)attrs[k]=v end,GetAttribute=function(_,k)return attrs[k]end, Destroy=function(self)self.destroyed=true end}
+		actor.model={FindFirstChild=function()return nil end,SetAttribute=function(_,k,v)attrs[k]=v end,GetAttribute=function(_,k)return attrs[k]end, Destroy=function(self)self.destroyed=true end}
 		actor.seat={Position=frame.Position,GetPropertyChangedSignal=function()return changed end,FindFirstChild=function()return nil end}
 		actor.seat.Sit=function(self,h)self.Occupant=h;h.SeatPart=self;h.Sit=true;changed:Fire()end
 		actor.model.PivotTo=function(_,cf)

@@ -17,7 +17,12 @@ function HUD.start()
 	local function render()
 		if not state then return end
 		ui.phase.Text = Strings[state.phase] or state.phase
-		ui.stats.Text = string.format("%d Coins  ·  %d XP  ·  팀 %d/4", state.coins, state.xp, state.playerCount)
+		ui.stats.Text = string.format("Lv.%d · %d Coins · 팀 %d/4", state.level, state.coins, state.playerCount)
+		ui.note.Text = if state.data.mode=="READY" then (if state.data.dirty then "변경 저장 대기 · 자동 저장" else "영구 저장 연결됨")
+			elseif state.data.mode=="SAVING" then "저장 중…"
+			elseif state.data.mode=="LOADING" then "프로필 로딩 중 · 참가 대기"
+			elseif state.data.mode=="SAVE_ERROR" then "저장 실패 · 재시도 중 · 상점 잠김"
+			else "세션 전용 · 이번 진행은 저장되지 않습니다"
 		if state.phase == "RESULTS" then
 			ui.title.Text = state.result
 			ui.hint.Text = string.format("성공 %d / 실패 %d · +%d Coins\n잠시 후 다음 배달을 준비합니다.", state.successes, state.failures, state.reward)
@@ -31,7 +36,7 @@ function HUD.start()
 		ui.hint.Visible = not collapsed
 		ui.card.Size = UDim2.fromOffset(math.min(300, math.max(190, ui.root.AbsoluteSize.X - 140)), if collapsed then 42 else 142)
 		ui.stats.Position = UDim2.fromOffset(16, if collapsed then 134 else 234)
-		ui.note.Position = UDim2.fromOffset(16, if collapsed then 160 else 260)
+		ui.note.Position = UDim2.fromOffset(16, if collapsed then 182 else 282)
 		ui.toggle.Text = if collapsed then "주문 펼치기" else "주문 접기"
 	end
 	table.insert(connections, ui.toggle.Activated:Connect(function() collapsed = not collapsed; render() end))

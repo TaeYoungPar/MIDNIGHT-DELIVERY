@@ -1,6 +1,6 @@
 # 검증 기록과 Studio 절차
 
-현재 빌드는 P4입니다. 최신 검사와 수동 절차는 맨 아래 **P4 스쿠터/모바일/스프린트/사운드** 절을 기준으로 합니다. 앞부분은 P1~P3 당시 기록입니다.
+현재 빌드는 P5입니다. 최신 검사 기록은 맨 아래 P5 절입니다. 사용자 수동 확인은 별도 **[USER_VERIFICATION.md](USER_VERIFICATION.md)**에 모았습니다. 앞부분은 이전 단계 당시 기록입니다.
 
 2026-10-28. 자동 검사 결과와 엔진 실행 결과를 구분합니다.
 
@@ -124,3 +124,23 @@ Lune는 Roblox Studio가 아닙니다. World 검사는 Instance 속성 데이터
 - https://github.com/Roblox/Core-Scripts/blob/master/PlayerScripts/StarterCharacterScripts/Sound.server.lua
 
 공식 문서로 API와 기본 경로를 대조했으며, 그것이 현재 엔진에서의 주행/실제 소리 재생 성공을 입증하지는 않습니다.
+
+
+## 2026-10-29 — P5 저장/레벨/꾸미기
+
+- `tests/profiles.luau`: **15개 PASS**. 실제 ProfileModel/ProfileStore/Economy/ShopService와 메모리 UpdateAsync 어댑터. 현재 Unix 임대 시각, 손상/미지원 버전/비정상 값 거부, flat v1 이행, 서버 잠금/만료/오래된 서버 쓰기 차단, 제한 재시도, 저장 중 새 보상 보존, 잠금 해제/복원, 가격/레벨/보유/장착/권한/연타 검사.
+- `tests/data_service.luau`: **5개 PASS**. 실제 DataService의 미게시 세션 모드, Studio/앱 이름 분리, 지갑/XP/레벨 저장·복원, autosave, 로드 중 이탈 후 임대 해제 및 새로운 지갑 보호. 스케줄러/저장소는 대역이며 라이브 Roblox 요청은 아님.
+- 기존 47개와 합해 **67개** 번호 있는 로직/대역 테스트 PASS. 별도 라운드/오디오 통합 검사는 계속 실행.
+- Lune metadata: 모자/유령 배지의 비충돌·질량 없음·용접, 민트 차체 적용/기본 복원 PASS. 아바타 실제 착용 모습 검사는 아님.
+- 전체 컴파일, 핵심 순수 모델 strict 타입, Rojo 39개 소스 포함/일치 PASS.
+- 실제 Roblox DataStore 요청/종료 저장/재접속·모바일 UI·외형·멀티플레이는 **NOT TESTED**.
+
+### 수동 확인
+
+`docs/USER_VERIFICATION.md`의 준비/실행/차량/추격/저장·상점/멀티플레이 순서로 확인합니다. 특히 미게시 파일의 세션 전용/상점 잠금은 정상이며, 별도 비공개 테스트 경험 게시 및 API Services 허용 후 저장을 시험합니다. Studio와 앱 데이터는 의도적으로 분리되어 있습니다.
+
+공식 API 대조:
+- https://create.roblox.com/docs/reference/engine/classes/GlobalDataStore#UpdateAsync
+- https://create.roblox.com/docs/cloud-services/data-stores
+
+UpdateAsync 콜백은 재호출 가능/return nil 취소/내부 yield 금지 조건을 따릅니다. 실제 서비스 승인·저장 성공은 위 문서를 읽거나 어댑터 테스트를 통과한 것만으로 확인되지 않습니다.

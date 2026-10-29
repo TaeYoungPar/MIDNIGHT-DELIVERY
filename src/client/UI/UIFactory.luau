@@ -47,8 +47,8 @@ function Factory.create(playerGui: Instance)
 	toggle.Font, toggle.TextSize, toggle.TextColor3 = Enum.Font.GothamMedium, 14, Theme.Text
 	toggle.BackgroundColor3, toggle.Parent = Theme.Panel, root
 	local corner = Instance.new("UICorner"); corner.Parent = toggle
-	local stats = label(root, "Stats", "", UDim2.fromOffset(16, 234), UDim2.new(1, -32, 0, 22), 14, Theme.Orange)
-	local note = label(root, "Note", Strings.SessionOnly, UDim2.fromOffset(16, 260), UDim2.new(1, -32, 0, 34), 12, Theme.Muted)
+	local stats = label(root, "Stats", "", UDim2.fromOffset(16, 234), UDim2.new(1, -140, 0, 44), 14, Theme.Orange)
+	local note = label(root, "Note", Strings.SessionOnly, UDim2.fromOffset(16, 260), UDim2.new(1, -140, 0, 54), 12, Theme.Muted)
 	local arrow = label(root, "Arrow", "▲", UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(44, 44), 32, Theme.Cyan)
 	arrow.AnchorPoint, arrow.TextXAlignment = Vector2.new(0.5, 0.5), Enum.TextXAlignment.Center
 	local distance = label(root, "Distance", "", UDim2.fromScale(0.5, 0.6), UDim2.fromOffset(210, 32), 14, Theme.Cyan)

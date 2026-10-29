@@ -16,6 +16,7 @@ local workspace = r.Instance.new("Workspace")
 local lighting = r.Instance.new("Lighting")
 local replicated = { Shared = node("src/shared") }
 local game = { GetService = function(_, name)
+	if name == "Players" or name == "RunService" then return {} end
 	if name == "Lighting" then return lighting end
 	if name == "ReplicatedStorage" then return replicated end
 	error("Unexpected service " .. name)
@@ -72,6 +73,24 @@ for id = 1, 4 do
 	table.insert(scooters,actor)
 end
 assert(#first.world.Vehicles:GetChildren() == 4)
+local vehicleService=loadModule(node("src/server/Services/VehicleService"))
+local cosmeticService=loadModule(node("src/server/Services/CosmeticService"))
+local char=r.Instance.new("Model");char.Name="TestAvatar";char.Parent=workspace
+local head=r.Instance.new("Part");head.Name="Head";head.Size=r.Vector3.new(2,1,1);head.CFrame=r.CFrame.new(0,5,0);head.Parent=char
+local torso=r.Instance.new("Part");torso.Name="UpperTorso";torso.Size=r.Vector3.new(2,2,1);torso.CFrame=r.CFrame.new(0,3,0);torso.Parent=char
+local owner={Character=char}
+local vehicleRuntime=setmetatable({slots={{owner=owner,actor=scooters[1]}}},vehicleService)
+local profile={equipped={hat="neon_cap",badge="ghost_badge",scooter="scooter_mint"}}
+local cosmetics=cosmeticService.new({profile=function()return profile end},vehicleRuntime)
+cosmetics:apply(owner)
+assert(char.MidnightCosmetics:FindFirstChild("Cap")and char.MidnightCosmetics:FindFirstChild("GhostBadge"))
+assert(scooters[1].model.Body.Color.G>scooters[1].model.Body.Color.R)
+for _,part in char.MidnightCosmetics:GetDescendants()do
+	if part:IsA("BasePart")then assert(not part.Anchored and part.Massless and not part.CanCollide and not part.CanQuery)end
+end
+profile.equipped={hat="",badge="",scooter=""};cosmetics:apply(owner)
+assert(#char.MidnightCosmetics:GetChildren()==0 and scooters[1].model.Body.Color.R>scooters[1].model.Body.Color.G)
+char:Destroy()
 for _, actor in scooters do actor.model:Destroy() end
 local monsterFactory = loadModule(node("src/server/World/MonsterFactory"))
 for _, kind in { "Ghost", "Giant", "Fake" } do

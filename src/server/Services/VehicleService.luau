@@ -63,6 +63,7 @@ function Service.add(self: Runtime, player: Player)
 			slot.owner = player
 			slot.actor.model:SetAttribute("OwnerUserId", player.UserId)
 			slot.actor.prompt.ObjectText = player.DisplayName .. "의 스쿠터"
+			self:skin(player,"")
 			return
 		end
 	end
@@ -125,6 +126,13 @@ function Service.seated(self: Runtime, player: Player): boolean
 	local root, humanoid = self.states:root(player)
 	return slot ~= nil and root ~= nil and humanoid ~= nil and humanoid.Sit and humanoid.SeatPart == slot.actor.seat
 		and slot.actor.seat.Occupant == humanoid and (root.Position - slot.actor.seat.Position).Magnitude <= 12
+end
+function Service.skin(self: Runtime, player: Player, id: string)
+	local slot = self:slot(player)
+	if not slot then return end
+	local body = slot.actor.model:FindFirstChild("Body")
+	if body and body:IsA("BasePart") then body.Color = if id=="scooter_mint" then Color3.fromRGB(99,216,184) else Color3.fromRGB(255,170,69) end
+	slot.actor.model:SetAttribute("SkinId",id)
 end
 function Service.status(self: Runtime, player: Player)
 	local slot = self:slot(player)

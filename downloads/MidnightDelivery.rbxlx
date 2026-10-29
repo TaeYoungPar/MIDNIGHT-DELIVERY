@@ -27,11 +27,24 @@ return table.freeze({
       </Item>
       <Item class="ModuleScript" referent="3">
         <Properties>
+          <string name="Name">Catalogs</string>
+          <string name="Source"><![CDATA[--!strict
+-- 가격/해금/꾸미기 슬롯은 서버도 이 카탈로그로 검사한다. Robux 상품은 사용하지 않는다.
+return table.freeze({
+	{ id = "neon_cap", name = "네온 배달 모자", slot = "hat", price = 120, level = 1, description = "주황 네온 챙 모자" },
+	{ id = "scooter_mint", name = "민트 스쿠터", slot = "scooter", price = 180, level = 2, description = "성능 변화 없는 민트 차체" },
+	{ id = "ghost_badge", name = "유령 배지", slot = "badge", price = 240, level = 2, description = "작은 보랏빛 유령 배지" },
+})
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
           <string name="Name">Config</string>
           <string name="Source"><![CDATA[--!strict
 -- 타이머와 보상은 서버에서도 같은 설정을 사용한다. 주문 3건의 제한과 고객별 조건도 중앙에서 관리한다.
 return table.freeze({
-	Build = "P4 스쿠터·모바일·사운드 / Studio 검증 대기",
+	Build = "P5 저장·레벨·꾸미기 / Studio 검증 대기",
 	Round = table.freeze({ Waiting = 20, Preparing = 10, Playing = 420, Results = 15, MaxPlayers = 4 }),
 	Delivery = table.freeze({ Reward = 80, XP = 20, Distance = 12, Cooldown = 0.6 }),
 	Orders = table.freeze({ Duration = 120, GhostHold = 4, GhostCooldown = 10, GiantHot = 90, GiantCalm = 3, FakeLock = 10 }),
@@ -51,7 +64,7 @@ return table.freeze({
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="4">
+      <Item class="ModuleScript" referent="5">
         <Properties>
           <string name="Name">OrderCatalog</string>
           <string name="Source"><![CDATA[--!strict
@@ -66,7 +79,7 @@ return table.freeze({
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="5">
+      <Item class="ModuleScript" referent="6">
         <Properties>
           <string name="Name">RemoteNames</string>
           <string name="Source"><![CDATA[--!strict
@@ -74,7 +87,7 @@ return table.freeze({ Action = "RequestAction", Folder = "Remotes", State = "Gam
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="6">
+      <Item class="ModuleScript" referent="7">
         <Properties>
           <string name="Name">Strings</string>
           <string name="Source"><![CDATA[--!strict
@@ -93,12 +106,13 @@ return table.freeze({
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="7">
+      <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">Types</string>
           <string name="Source"><![CDATA[--!strict
 export type Phase = "WAITING" | "PREPARING" | "PLAYING" | "RESULTS"
 export type Snapshot = {
+	level: number, data: { mode: string, reason: string, dirty: boolean }, owned: { [string]: boolean }, equipped: { [string]: string },
 	vehicle: { owned: boolean, seated: boolean, speed: number, resetAt: number }, stamina: number,
 	downUntil: number, protectedUntil: number, members: { { name: string, downUntil: number } },
 	chase: { kind: string, targetId: number, endsAt: number },
@@ -115,15 +129,15 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="8">
+  <Item class="ServerScriptService" referent="9">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="9">
+    <Item class="Folder" referent="10">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="Script" referent="10">
+      <Item class="Script" referent="11">
         <Properties>
           <string name="Name">Bootstrap</string>
           <token name="RunContext">0</token>
@@ -153,15 +167,15 @@ folder.Parent = ReplicatedStorage
 local stop = RoundService.start(world, remotes)
 Players.CharacterAutoLoads = true
 game:BindToClose(stop)
-print("[MidnightDelivery] Server bootstrap ready (P4)")
+print("[MidnightDelivery] Server bootstrap ready (P5)")
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="11">
+      <Item class="Folder" referent="12">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="ModuleScript" referent="12">
+        <Item class="ModuleScript" referent="13">
           <Properties>
             <string name="Name">ActionLimiter</string>
             <string name="Source"><![CDATA[--!strict
@@ -186,15 +200,199 @@ return Limiter
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="13">
+        <Item class="ModuleScript" referent="14">
+          <Properties>
+            <string name="Name">CosmeticService</string>
+            <string name="Source"><![CDATA[--!strict
+local P = require(script.Parent.Parent.World.Primitives)
+local Service={}
+Service.__index=Service
+function Service.new(data,vehicles) return setmetatable({data=data,vehicles=vehicles,bindings={},cache={},stopped=false},Service) end
+function Service:apply(player)
+	local profile=self.data:profile(player)
+	local equipped=if profile then profile.equipped else {}
+	self.vehicles:skin(player,equipped.scooter or "")
+	local char=player.Character
+	local head=char and char:FindFirstChild("Head")
+	if not char or not head or not head:IsA("BasePart") then return end
+	local signature=(equipped.hat or "")..":"..(equipped.scooter or "")..":"..(equipped.badge or "")
+	local cached=self.cache[player]
+	if cached and cached.character==char and cached.signature==signature then return end
+	self.cache[player]={character=char,signature=signature}
+	local previous=char:FindFirstChild("MidnightCosmetics")
+	if previous then previous:Destroy() end
+	local model=Instance.new("Model")
+	model.Name,model.Parent="MidnightCosmetics",char
+	local function part(name,size,frame,color,target,material)
+		local body=P.part(model,name,size,frame,color,material)
+		body.Anchored,body.Massless,body.CanCollide,body.CanTouch,body.CanQuery=false,true,false,false,false
+		local weld=Instance.new("WeldConstraint")
+		weld.Part0,weld.Part1,weld.Parent=target,body,body
+		return body
+	end
+	if equipped.hat=="neon_cap" then
+		local color=Color3.fromRGB(255,170,69)
+		part("Cap",Vector3.new(head.Size.X+0.3,0.5,head.Size.Z+0.2),head.CFrame*CFrame.new(0,head.Size.Y/2+0.2,0),color,head)
+		part("NeonBrim",Vector3.new(head.Size.X+0.5,0.12,1),head.CFrame*CFrame.new(0,head.Size.Y/2,-0.8),color,head,Enum.Material.Neon)
+	end
+	if equipped.badge=="ghost_badge" then
+		local torso=char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+		if torso and torso:IsA("BasePart") then
+			local body=part("GhostBadge",Vector3.new(0.65,0.8,0.25),torso.CFrame*CFrame.new(-0.5,0.2,-torso.Size.Z/2-0.2),Color3.fromRGB(170,139,255),torso,Enum.Material.Neon)
+			body.Shape=Enum.PartType.Ball
+			for _,x in {-0.64,-0.36} do
+				part("BadgeEye",Vector3.new(0.1,0.15,0.08),torso.CFrame*CFrame.new(x,0.32,-torso.Size.Z/2-0.35),Color3.fromRGB(27,39,64),torso)
+			end
+		end
+	end
+end
+function Service:add(player)
+	self.bindings[player]=player.CharacterAdded:Connect(function(char)
+		task.spawn(function()
+			char:WaitForChild("Head",10)
+			if not self.stopped and self.bindings[player] and player.Character==char then self:apply(player) end
+		end)
+	end)
+	self:apply(player)
+end
+function Service:remove(player) self.cache[player]=nil;if self.bindings[player] then self.bindings[player]:Disconnect();self.bindings[player]=nil end end
+function Service:destroy() self.stopped=true;for player in self.bindings do self:remove(player) end end
+return Service
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="15">
+          <Properties>
+            <string name="Name">DataService</string>
+            <string name="Source"><![CDATA[--!strict
+local Model = require(script.Parent.ProfileModel)
+local ProfileStore = require(script.Parent.ProfileStore)
+local Service = {}
+Service.__index = Service
+function Service.new(economy, changed)
+	local DataStores = game:GetService("DataStoreService")
+	local Http = game:GetService("HttpService")
+	local Run = game:GetService("RunService")
+	local name = if Run:IsStudio() then "MidnightDelivery_Studio_PlayerData_v1" else "MidnightDelivery_Live_PlayerData_v1"
+	local adapter = nil
+	if game.GameId ~= 0 then
+		local ok,value = pcall(function() return DataStores:GetDataStore(name) end)
+		if ok then adapter=value end
+	end
+	print("[MidnightDelivery] Data namespace=" .. name .. (if adapter then "" else " (session only; unpublished/unavailable)"))
+	return setmetatable({economy=economy,changed=changed,adapter=adapter,http=Http,handles={},stopped=false},Service)
+end
+function Service:sync(player, handle)
+	if self.handles[player] ~= handle or handle.closing then return end
+	player:SetAttribute("Coins",handle.profile.coins)
+	player:SetAttribute("XP",handle.profile.xp)
+	player:SetAttribute("Level",Model.level(handle.profile.xp))
+	self.changed(player)
+end
+function Service:begin(player)
+	local placeholder = {profile=Model.default(),mode="LOADING",reason="",expiresAt=0,version=0,dirty=false,busy=false,closing=false,loading=true}
+	self.handles[player]=placeholder
+	self.economy.profiles[player.UserId]=placeholder.profile
+	self:sync(player,placeholder)
+	task.spawn(function()
+		local store = if self.adapter then ProfileStore.new(self.adapter,os.time,task.wait,self.http:GenerateGUID(false)) else nil
+		placeholder.store=store
+		local loaded = if store then store:load(player.UserId) else {profile=Model.default(),mode="SESSION",reason="unpublished_or_unavailable",expiresAt=0,version=0,dirty=false,busy=false}
+		-- 퇴장 중 로드가 끝나도 새 Player의 메모리 프로필을 덮지 않는다.
+		for _,key in {"profile","mode","reason","expiresAt","version","dirty","busy"} do placeholder[key]=loaded[key] end
+		placeholder.loading=false
+		if loaded.mode=="SESSION" then warn("[MidnightDelivery] Profile session-only: user="..player.UserId.." reason="..tostring(loaded.reason)) end
+		placeholder.nextSave=os.clock()+60+(player.UserId%15)
+		if placeholder.closing or self.stopped then self:close(player,placeholder);return end
+		if self.handles[player]~=placeholder then return end
+		self.economy.profiles[player.UserId]=placeholder.profile
+		self:sync(player,placeholder)
+	end)
+end
+function Service:loaded(player): boolean
+	local h=self.handles[player]
+	return h~=nil and not h.loading and not h.closing
+end
+function Service:canEarn(player): boolean
+	local h=self.handles[player]
+	if not h or h.loading or h.closing then return false end
+	if h.store then h.store:writable(h) end
+	return true
+end
+function Service:canShop(player): boolean
+	local h=self.handles[player]
+	return h~=nil and h.store~=nil and h.mode=="READY" and h.store:writable(h) and not h.closing
+end
+function Service:profile(player)
+	local h=self.handles[player]
+	return if h then h.profile else nil
+end
+function Service:status(player)
+	local h=self.handles[player]
+	if not h then return {mode="LOADING",reason="",dirty=false} end
+	return {mode=if h.busy then "SAVING" else h.mode,reason=h.reason,dirty=h.dirty}
+end
+function Service:touch(player)
+	local h=self.handles[player]
+	if not h or h.closing then return end
+	h.version+=1
+	if h.mode=="READY" or h.mode=="SAVE_ERROR" then h.dirty=true end
+	self:sync(player,h)
+end
+function Service:queueSave(player)
+	local h=self.handles[player]
+	if h then h.nextSave=math.min(h.nextSave or math.huge,os.clock()+5) end
+end
+function Service:tick()
+	for player,h in self.handles do
+		if not h.loading and not h.closing and h.store and not h.busy and os.clock()>=(h.nextSave or math.huge)
+			and (h.mode=="READY" or h.mode=="SAVE_ERROR") then
+			h.nextSave=os.clock()+60+(player.UserId%15)
+			task.spawn(function()
+				local ok=h.store:save(player.UserId,h,false)
+				if not ok then warn("[MidnightDelivery] Profile save not confirmed: user="..player.UserId.." reason="..h.reason) end
+				self:sync(player,h)
+			end)
+		end
+	end
+end
+function Service:close(player,h)
+	if h.closeBusy or h.closed then return end
+	h.closeBusy,h.closing=true,true
+	local deadline=os.clock()+25
+	while (h.loading or h.busy) and os.clock()<deadline do task.wait(0.1) end
+	local neededSave=h.loading or h.mode=="READY" or h.mode=="SAVE_ERROR"
+	local ok=h.mode=="SESSION"
+	if not h.loading and not h.busy and h.store then ok=h.store:save(player.UserId,h,true) end
+	if not ok and neededSave then warn("[MidnightDelivery] Closing profile not confirmed; user="..player.UserId) end
+	h.closeBusy,h.closed=false,true
+	-- 로드 요청이 25초 뒤에 끝나면 begin의 닫기 경로가 임대 해제를 다시 시도한다.
+	if h.loading then h.closed=false;return end
+	if self.handles[player]==h then self.handles[player]=nil end
+end
+function Service:remove(player)
+	local h=self.handles[player]
+	if h then h.closing=true;task.spawn(function()self:close(player,h)end) end
+end
+function Service:shutdown()
+	self.stopped=true
+	for player,h in self.handles do h.closing=true;task.spawn(function()self:close(player,h)end) end
+	local deadline=os.clock()+25
+	while next(self.handles) and os.clock()<deadline do task.wait(0.1) end
+end
+return Service
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">EconomyService</string>
             <string name="Source"><![CDATA[--!strict
--- P1은 세션 재화만 제공한다. 영구 저장 기능으로 오해하지 않도록 HUD에도 표시한다.
+-- 지갑은 DataService와 메모리 객체를 공유한다. 지급은 비동기 저장 콜백 밖에서 한 번만 실행한다.
 local Economy = {}
 Economy.__index = Economy
-type Profile = { coins: number, xp: number }
-type State = { profiles: { [number]: Profile }, paid: { [string]: boolean }, roundId: number }
+type Profile = { coins: number, xp: number, lifetimeDeliveries: number? }
+type State = { profiles: { [number]: Profile }, paid: { [string]: boolean }, roundId: number, canMutate: ((any) -> boolean)?, onMutation: ((any) -> ())? }
 type Service = typeof(setmetatable({} :: State, Economy))
 
 function Economy.new(): Service
@@ -214,6 +412,7 @@ function Economy.remove(self: Service, player: any)
 end
 
 function Economy.award(self: Service, player: any, roundId: number, coins: number, xp: number, orderId: number?): boolean
+	if self.canMutate and not self.canMutate(player) then return false end
 	if roundId < self.roundId then return false end
 	if roundId > self.roundId then self.roundId = roundId; table.clear(self.paid) end
 	local id = player.UserId
@@ -221,10 +420,12 @@ function Economy.award(self: Service, player: any, roundId: number, coins: numbe
 	if self.paid[key] or not self.profiles[id] then return false end
 	self.paid[key] = true
 	local profile = self.profiles[id]
-	profile.coins += coins
-	profile.xp += xp
+	profile.coins = math.min(1000000000,profile.coins + coins)
+	profile.xp = math.min(1000000000,profile.xp + xp)
+	if (orderId or 1) <= 3 then profile.lifetimeDeliveries = math.min(1000000000,(profile.lifetimeDeliveries or 0)+1) end
 	player:SetAttribute("Coins", profile.coins)
 	player:SetAttribute("XP", profile.xp)
+	if self.onMutation then self.onMutation(player) end
 	return true
 end
 
@@ -232,7 +433,7 @@ return Economy
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">MonsterService</string>
             <string name="Source"><![CDATA[--!strict
@@ -330,7 +531,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">MovementModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -358,7 +559,7 @@ return Model
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">OrderModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -454,7 +655,7 @@ return Order
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">OrderPlanner</string>
             <string name="Source"><![CDATA[--!strict
@@ -475,7 +676,7 @@ return Planner
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">PlayerStateModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -515,7 +716,7 @@ return State
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">PlayerStateService</string>
             <string name="Source"><![CDATA[--!strict
@@ -712,7 +913,183 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="23">
+          <Properties>
+            <string name="Name">ProfileModel</string>
+            <string name="Source"><![CDATA[--!strict
+-- 데이터 파싱/잠금/상점은 순수 함수로 분리한다. UpdateAsync 재호출에서 보상/구매를 실행하지 않는다.
+local Model = {}
+local MAX = 1000000000
+local thresholds = { 0, 100, 250, 450, 700, 1000, 1400, 1900, 2500, 3200 }
+export type Profile = { schemaVersion: number, coins: number, xp: number, lifetimeDeliveries: number,
+	owned: { [string]: boolean }, equipped: { [string]: string } }
+export type Row = { schemaVersion: number, profile: Profile, revision: number, updatedAt: number,
+	lease: { token: string, expiresAt: number }? }
+function Model.default(): Profile
+	return { schemaVersion = 1, coins = 0, xp = 0, lifetimeDeliveries = 0, owned = {}, equipped = {hat="",scooter="",badge=""} }
+end
+function Model.integer(value: any, maximum: number?): boolean
+	return typeof(value) == "number" and value == value and value >= 0 and value <= (maximum or MAX) and value % 1 == 0
+end
+function Model.copy(profile: Profile): Profile
+	return { schemaVersion = 1, coins = profile.coins, xp = profile.xp, lifetimeDeliveries = profile.lifetimeDeliveries,
+		owned = table.clone(profile.owned), equipped = table.clone(profile.equipped) }
+end
+function Model.level(xp: number): number
+	local level = 1
+	for index, threshold in thresholds do if xp >= threshold then level = index end end
+	return level
+end
+function Model.decode(raw: any): (Row?, string?)
+	if raw == nil then return {schemaVersion=1,profile=Model.default(),revision=0,updatedAt=0}, nil end
+	if typeof(raw) ~= "table" or raw.schemaVersion ~= 1 then return nil,"unsupported_schema" end
+	local source = if raw.profile ~= nil then raw.profile else raw
+	if typeof(source) ~= "table" or not Model.integer(source.coins) or not Model.integer(source.xp)
+		or not Model.integer(if source.lifetimeDeliveries ~= nil then source.lifetimeDeliveries else 0) then return nil,"invalid_currency" end
+	if source.schemaVersion ~= nil and source.schemaVersion ~= 1 then return nil,"unsupported_schema" end
+	local profile = Model.default()
+	profile.coins, profile.xp, profile.lifetimeDeliveries = source.coins, source.xp, if source.lifetimeDeliveries ~= nil then source.lifetimeDeliveries else 0
+	local owned = if source.owned ~= nil then source.owned elseif source.ownedCosmetics ~= nil then source.ownedCosmetics else {}
+	if typeof(owned) ~= "table" then return nil,"invalid_inventory" end
+	local count = 0
+	for key, value in owned do
+		local id = if typeof(key) == "number" then value else key
+		if typeof(id) ~= "string" or #id > 64 or not string.match(id,"^[%w_]+$") or (typeof(key) ~= "number" and value ~= true) then return nil,"invalid_item" end
+		profile.owned[id] = true; count += 1
+		if count > 100 then return nil,"inventory_too_large" end
+	end
+	local equipped = if source.equipped ~= nil then source.equipped else {}
+	if typeof(equipped) ~= "table" then return nil,"invalid_equipped" end
+	for _, slot in {"hat","scooter","badge"} do
+		local id = if equipped[slot] ~= nil then equipped[slot] else ""
+		if typeof(id) ~= "string" or (#id > 0 and not profile.owned[id]) then return nil,"unowned_equipped" end
+		profile.equipped[slot] = id
+	end
+	-- 최초 기획의 기본 스킨은 별도 파트가 없는 기본 외형으로 이행한다.
+	local revision = raw.revision or 0
+	if not Model.integer(revision) then return nil,"invalid_revision" end
+	local lease = raw.lease
+	if lease ~= nil and (typeof(lease) ~= "table" or typeof(lease.token) ~= "string" or #lease.token < 1 or #lease.token > 200
+		or not Model.integer(lease.expiresAt,1000000000000)) then return nil,"invalid_lease" end
+	return {schemaVersion=1,profile=profile,revision=revision,updatedAt=raw.updatedAt or 0,
+		lease=if lease then {token=lease.token,expiresAt=lease.expiresAt} else nil},nil
+end
+function Model.acquire(raw: any, token: string, now: number, ttl: number): (Row?, string?)
+	local row, reason = Model.decode(raw)
+	if not row then return nil,reason end
+	if row.lease and row.lease.token ~= token and row.lease.expiresAt > now then return nil,"locked" end
+	row.lease = {token=token,expiresAt=now+ttl}
+	row.updatedAt = now
+	return row,nil
+end
+function Model.write(raw: any, token: string, profile: Profile, now: number, ttl: number, release: boolean): (Row?, string?)
+	local row, reason = Model.decode(raw)
+	if not row then return nil,reason end
+	if not row.lease or row.lease.token ~= token or row.lease.expiresAt <= now then return nil,"lease_lost" end
+	row.profile, row.revision, row.updatedAt = Model.copy(profile), row.revision+1, now
+	row.lease = if release then nil else {token=token,expiresAt=now+ttl}
+	return row,nil
+end
+function Model.purchase(profile: Profile, item: any): (boolean,string)
+	if not item then return false,"없는 상품입니다" end
+	if profile.owned[item.id] then return false,"이미 보유하고 있습니다" end
+	local count=0;for _ in profile.owned do count+=1 end
+	if count>=100 then return false,"보관함이 가득 찼습니다" end
+	if Model.level(profile.xp) < item.level then return false,"레벨이 부족합니다" end
+	if profile.coins < item.price then return false,"Coins가 부족합니다" end
+	profile.coins -= item.price; profile.owned[item.id] = true
+	return true,"구매 완료 · 장착을 눌러주세요"
+end
+function Model.equip(profile: Profile, item: any, enabled: boolean): (boolean,string)
+	if not item or not profile.owned[item.id] then return false,"보유하지 않은 상품입니다" end
+	profile.equipped[item.slot] = if enabled then item.id else ""
+	return true,if enabled then "장착했습니다" else "해제했습니다"
+end
+return Model
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="24">
+          <Properties>
+            <string name="Name">ProfileStore</string>
+            <string name="Source"><![CDATA[--!strict
+local Model = require(script.Parent.ProfileModel)
+local Store = {}
+Store.__index = Store
+export type Session = { profile: Model.Profile, mode: string, reason: string, expiresAt: number,
+	version: number, dirty: boolean, busy: boolean, closing: boolean }
+type Settings = { adapter: any, now: () -> number, waitFor: (number) -> any, token: string, ttl: number, guard: number }
+export type Runtime = typeof(setmetatable({} :: Settings, Store))
+-- adapter: UpdateAsync. clocks/wait는 테스트에서 주입하며, 콜백 내부에서는 yield하지 않는다.
+function Store.new(adapter: any, now: () -> number, waitFor: (number) -> any, token: string): Runtime
+	return setmetatable({adapter=adapter,now=now,waitFor=waitFor,token=token,ttl=180,guard=30},Store)
+end
+function Store.request(self: Runtime, key: string, transform: (any) -> (Model.Row?, string?)): (Model.Row?, string?)
+	local errorReason = "request_failed"
+	for attempt=1,3 do
+		local reason: string? = nil
+		local ok,result = pcall(function()
+			return self.adapter:UpdateAsync(key,function(old,info)
+				local nextRow, why = transform(old)
+				reason = why
+				if nextRow and info then return nextRow,info:GetUserIds(),info:GetMetadata() end
+				return nextRow
+			end)
+		end)
+		if ok then return result,reason end
+		errorReason = "request_failed"
+		if attempt < 3 then self.waitFor(2^(attempt-1)) end
+	end
+	return nil,errorReason
+end
+function Store.load(self: Runtime, id: number): Session
+	local row,reason = self:request("User_"..id,function(old) return Model.acquire(old,self.token,self.now(),self.ttl) end)
+	if row and not reason then
+		row,reason=Model.decode(row)
+		if row and (not row.lease or row.lease.token~=self.token or row.lease.expiresAt<=self.now()+self.guard) then row,reason=nil,"locked" end
+	end
+	if not row or reason then return {profile=Model.default(),mode="SESSION",reason=reason or "load_failed",expiresAt=0,version=0,dirty=false,busy=false,closing=false} end
+	local lease=row.lease
+	assert(lease,"Acquired profile must have a lease")
+	return {profile=Model.copy(row.profile),mode="READY",reason="",expiresAt=lease.expiresAt,version=0,dirty=false,busy=false,closing=false}
+end
+function Store.writable(self: Runtime, record: Session): boolean
+	if record.mode ~= "READY" and record.mode ~= "SAVE_ERROR" then return false end
+	if self.now() >= record.expiresAt-self.guard then
+		record.mode,record.reason,record.dirty = "SESSION","lease_expired",false
+		return false
+	end
+	return not record.closing
+end
+function Store.save(self: Runtime, id: number, record: Session, release: boolean): boolean
+	if record.busy or (record.mode ~= "READY" and record.mode ~= "SAVE_ERROR") then return false end
+	if self.now() >= record.expiresAt-self.guard then record.mode,record.reason="SESSION","lease_expired";return false end
+	record.busy = true
+	local snapshot,version = Model.copy(record.profile),record.version
+	local row,reason = self:request("User_"..id,function(old)
+		if record.mode=="SESSION" then return nil,"lease_lost" end
+		return Model.write(old,self.token,snapshot,self.now(),self.ttl,release)
+	end)
+	record.busy = false
+	-- 늦게 온 성공 응답이 이미 세션 전용으로 전환된 핸들의 쓰기 권한을 되살리지 않는다.
+	if record.mode=="SESSION" then return false end
+	if not row or reason then
+		if reason == "request_failed" then record.mode="SAVE_ERROR" else record.mode="SESSION" end
+		record.reason = reason or "save_failed"
+		return false
+	end
+	local lease=row.lease
+	if not release and not lease then record.mode,record.reason="SESSION","lease_lost";return false end
+	record.expiresAt = if lease then lease.expiresAt else 0
+	record.dirty = record.version ~= version
+	record.mode,record.reason = if release then "CLOSED" else "READY",""
+	return true
+end
+return Store
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">RoundModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -795,7 +1172,7 @@ return RoundModel
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">RoundService</string>
             <string name="Source"><![CDATA[--!strict
@@ -814,6 +1191,9 @@ local Monsters = require(script.Parent.MonsterService)
 local Vehicles = require(script.Parent.VehicleService)
 local Movement = require(script.Parent.MovementModel)
 local ActionLimiter = require(script.Parent.ActionLimiter)
+local Data = require(script.Parent.DataService)
+local Shop = require(script.Parent.ShopService)
+local Cosmetics = require(script.Parent.CosmeticService)
 local RoundService = {}
 type Destination = { prompt: ProximityPrompt, target: Vector3, door: Part }
 type World = { world: Folder, spawn: SpawnLocation, destinations: { [string]: Destination }, fakeCenter: Vector3 }
@@ -823,7 +1203,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local model = RoundModel.new(Config.Round)
 	local orders: OrderModel.Model? = nil
 	local security, economy = Security.new(), Economy.new()
-	local playerStates, monsters, vehicles
+	local playerStates, monsters, vehicles, data, shop, cosmetics
 	local limiter = ActionLimiter.new()
 	local runners = {}
 	local version, elapsed = 0, 0
@@ -843,6 +1223,10 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		local target = if spec and spec.kind == "Fake" then world.fakeCenter
 			elseif spec then world.destinations[spec.destination].target else nil
 		return {
+			level = player:GetAttribute("Level") or 1,
+			data = if data then data:status(player) else {mode="LOADING",reason="",dirty=false},
+			owned = if data and data:profile(player) then table.clone(data:profile(player).owned) else {},
+			equipped = if data and data:profile(player) then table.clone(data:profile(player).equipped) else {},
 			vehicle = if vehicles then vehicles:status(player) else { owned = false, seated = false, speed = 0, resetAt = 0 },
 			stamina = if runners[player] then runners[player].value else 5,
 			downUntil = status.downUntil, protectedUntil = status.protectedUntil, members = members,
@@ -885,6 +1269,15 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	vehicles = if dependencies and dependencies.vehicles then dependencies.vehicles else Vehicles.new(world.world:FindFirstChild("Vehicles"), playerStates, canRide, publish,
 		function(player) security:authorizePosition(player, now()) end)
 	playerStates.beforeDown = function(player) vehicles:exit(player) end
+	local function dataChanged(player)
+		if cosmetics then cosmetics:apply(player) end
+		publish()
+	end
+	data = if dependencies and dependencies.data then dependencies.data else Data.new(economy,dataChanged)
+	economy.canMutate = function(player) return data:canEarn(player) end
+	economy.onMutation = function(player) data:touch(player) end
+	cosmetics = if dependencies and dependencies.cosmetics then dependencies.cosmetics else Cosmetics.new(data,vehicles)
+	shop = if dependencies and dependencies.shop then dependencies.shop else Shop.new(data,function(player)cosmetics:apply(player)end)
 	local function chase(kind, player, destinationId)
 		local destination = world.destinations[destinationId]
 		if destination and player then monsters:start(kind, player, destination.target + Vector3.new(0, 0, -10)) end
@@ -921,12 +1314,14 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		player:SetAttribute("RoundReward", 0)
 		player:SetAttribute("Stamina", 5)
 		playerStates:add(player)
+		cosmetics:add(player)
+		data:begin(player)
 		publish()
 	end
 	for _, player in Players:GetPlayers() do add(player) end
 	table.insert(connections, Players.PlayerAdded:Connect(add))
 	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
-		model:remove(player.UserId); security:remove(player); economy:remove(player); vehicles:remove(player); playerStates:remove(player)
+		model:remove(player.UserId); security:remove(player); data:remove(player); cosmetics:remove(player); shop:remove(player); economy:remove(player); vehicles:remove(player); playerStates:remove(player)
 		runners[player] = nil; limiter:remove(player.UserId)
 		holds[player] = nil
 		task.defer(publish)
@@ -940,6 +1335,10 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		if payload.kind == "VehicleInput" then vehicles:input(player, payload.throttle, payload.steer)
 		elseif payload.kind == "ResetVehicle" then vehicles:reset(player, true); publish()
 		elseif payload.kind == "ExitVehicle" then vehicles:exit(player); publish()
+		elseif payload.kind=="PurchaseWithCoins" or payload.kind=="EquipCosmetic" then
+			if not playerStates:canAct(player) or vehicles:seated(player) then remotes.Feedback:FireClient(player,"도보 상태에서 상점을 이용하세요");return end
+			local _,message = shop:action(player,payload.kind,payload.itemId,payload.enabled)
+			remotes.Feedback:FireClient(player,message);publish()
 		elseif payload.kind == "Sprint" and typeof(payload.enabled) == "boolean" then
 			local runner = runners[player]
 			if runner then runner.wants, runner.inputAt = payload.enabled and playerStates:canAct(player), now() end
@@ -993,6 +1392,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		elapsed += delta
 		if elapsed < 0.1 then return end
 		elapsed = 0
+		data:tick()
 		playerStates:tick()
 		monsters:tick()
 		local timestamp, ids = now(), {}
@@ -1007,7 +1407,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 				if math.abs((player:GetAttribute("Stamina") or 5) - runner.value) > 0.2 then player:SetAttribute("Stamina", runner.value) end
 				if playerStates:canAct(player) then humanoid.WalkSpeed = speed end
 			end
-			table.insert(ids, player.UserId)
+			if data:loaded(player) then table.insert(ids, player.UserId) end
 		end
 		for player, hold in holds do
 			local dest = world.destinations[hold.destination]
@@ -1050,18 +1450,20 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	publish()
 	return function()
 		for _, connection in connections do connection:Disconnect() end
+		cosmetics:destroy()
 		vehicles:destroy()
 		monsters:destroy()
 		playerStates:destroy()
 		remotes.Snapshot.OnServerInvoke = nil
 		for _, dest in world.destinations do dest.prompt.Enabled = false end
+		data:shutdown()
 	end
 end
 return RoundService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">SecurityService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1138,7 +1540,39 @@ return Security
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="28">
+          <Properties>
+            <string name="Name">ShopService</string>
+            <string name="Source"><![CDATA[--!strict
+local Catalog = require(game:GetService("ReplicatedStorage").Shared.Catalogs)
+local Profile = require(script.Parent.ProfileModel)
+local Service = {}
+Service.__index=Service
+function Service.new(data,apply) return setmetatable({data=data,apply=apply,last={}},Service) end
+function Service:action(player,kind,id,enabled): (boolean,string)
+	if typeof(id)~="string" or #id>64 or (kind=="EquipCosmetic" and typeof(enabled)~="boolean") then return false,"잘못된 요청입니다" end
+	if not self.data:canShop(player) then return false,"저장 연결이 준비되지 않아 상점이 잠겼습니다" end
+	local now=workspace:GetServerTimeNow()
+	if now-(self.last[player] or -math.huge)<0.4 then return false,"잠시 후 다시 눌러주세요" end
+	self.last[player]=now
+	local item=nil
+	for _,entry in Catalog do if entry.id==id then item=entry;break end end
+	if not item then return false,"없는 상품입니다" end
+	local profile=self.data:profile(player)
+	if not profile then return false,"프로필 로딩 중입니다" end
+	local ok,message
+	if kind=="PurchaseWithCoins" then ok,message=Profile.purchase(profile,item)
+	elseif kind=="EquipCosmetic" then ok,message=Profile.equip(profile,item,enabled)
+	else return false,"허용되지 않은 요청입니다" end
+	if ok then self.data:touch(player);self.data:queueSave(player);self.apply(player) end
+	return ok,message
+end
+function Service:remove(player) self.last[player]=nil end
+return Service
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1206,6 +1640,7 @@ function Service.add(self: Runtime, player: Player)
 			slot.owner = player
 			slot.actor.model:SetAttribute("OwnerUserId", player.UserId)
 			slot.actor.prompt.ObjectText = player.DisplayName .. "의 스쿠터"
+			self:skin(player,"")
 			return
 		end
 	end
@@ -1269,6 +1704,13 @@ function Service.seated(self: Runtime, player: Player): boolean
 	return slot ~= nil and root ~= nil and humanoid ~= nil and humanoid.Sit and humanoid.SeatPart == slot.actor.seat
 		and slot.actor.seat.Occupant == humanoid and (root.Position - slot.actor.seat.Position).Magnitude <= 12
 end
+function Service.skin(self: Runtime, player: Player, id: string)
+	local slot = self:slot(player)
+	if not slot then return end
+	local body = slot.actor.model:FindFirstChild("Body")
+	if body and body:IsA("BasePart") then body.Color = if id=="scooter_mint" then Color3.fromRGB(99,216,184) else Color3.fromRGB(255,170,69) end
+	slot.actor.model:SetAttribute("SkinId",id)
+end
 function Service.status(self: Runtime, player: Player)
 	local slot = self:slot(player)
 	return { owned = slot ~= nil, seated = self:seated(player), speed = if slot then math.abs(slot.speed) else 0,
@@ -1322,11 +1764,11 @@ return Service
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="24">
+      <Item class="Folder" referent="30">
         <Properties>
           <string name="Name">World</string>
         </Properties>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">BuildingFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1385,7 +1827,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">MonsterFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1442,7 +1884,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">NavigationSigns</string>
             <string name="Source"><![CDATA[--!strict
@@ -1471,7 +1913,7 @@ return Navigation
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">Primitives</string>
             <string name="Source"><![CDATA[--!strict
@@ -1509,7 +1951,7 @@ return Primitives
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">VehicleFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1550,7 +1992,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">WorldBuilder</string>
             <string name="Source"><![CDATA[--!strict
@@ -1664,25 +2106,25 @@ return WorldBuilder
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="31">
+  <Item class="SoundService" referent="37">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="32">
+  <Item class="StarterPlayer" referent="38">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="33">
+    <Item class="StarterPlayerScripts" referent="39">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="34">
+      <Item class="Folder" referent="40">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="35">
+        <Item class="LocalScript" referent="41">
           <Properties>
             <string name="Name">Bootstrap</string>
             <string name="Source"><![CDATA[--!strict
@@ -1701,11 +2143,12 @@ local feedbackRemote = folder:WaitForChild(Names.Feedback)
 local snapshotRemote = folder:WaitForChild(Names.Snapshot)
 local controls = require(script.Parent.Controllers.InputController).start(folder:WaitForChild(Names.Action))
 local audio = require(script.Parent.Controllers.AudioController).start()
+local shop = require(script.Parent.Controllers.ShopController).start(folder:WaitForChild(Names.Action))
 local latestVersion = -1
 local function update(snapshot)
 	if not snapshot or snapshot.version < latestVersion then return end
 	latestVersion = snapshot.version
-	hud.update(snapshot); controls.update(snapshot); audio.update(snapshot)
+	hud.update(snapshot); controls.update(snapshot); audio.update(snapshot); shop.update(snapshot)
 end
 local stateConnection = stateRemote.OnClientEvent:Connect(update)
 local feedbackConnection = feedbackRemote.OnClientEvent:Connect(hud.feedback)
@@ -1721,20 +2164,21 @@ end)
 script.Destroying:Connect(function()
 	stateConnection:Disconnect()
 	feedbackConnection:Disconnect()
+	shop.destroy()
 	controls.destroy()
 	audio.destroy()
 	hud.destroy()
 	stopSpawn()
 end)
-print("[MidnightDelivery] Client GUI ready (P4)")
+print("[MidnightDelivery] Client GUI ready (P5)")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="36">
+        <Item class="Folder" referent="42">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="37">
+          <Item class="ModuleScript" referent="43">
             <Properties>
               <string name="Name">AudioController</string>
               <string name="Source"><![CDATA[--!strict
@@ -1830,7 +2274,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="38">
+          <Item class="ModuleScript" referent="44">
             <Properties>
               <string name="Name">HUDController</string>
               <string name="Source"><![CDATA[--!strict
@@ -1852,7 +2296,12 @@ function HUD.start()
 	local function render()
 		if not state then return end
 		ui.phase.Text = Strings[state.phase] or state.phase
-		ui.stats.Text = string.format("%d Coins  ·  %d XP  ·  팀 %d/4", state.coins, state.xp, state.playerCount)
+		ui.stats.Text = string.format("Lv.%d · %d Coins · 팀 %d/4", state.level, state.coins, state.playerCount)
+		ui.note.Text = if state.data.mode=="READY" then (if state.data.dirty then "변경 저장 대기 · 자동 저장" else "영구 저장 연결됨")
+			elseif state.data.mode=="SAVING" then "저장 중…"
+			elseif state.data.mode=="LOADING" then "프로필 로딩 중 · 참가 대기"
+			elseif state.data.mode=="SAVE_ERROR" then "저장 실패 · 재시도 중 · 상점 잠김"
+			else "세션 전용 · 이번 진행은 저장되지 않습니다"
 		if state.phase == "RESULTS" then
 			ui.title.Text = state.result
 			ui.hint.Text = string.format("성공 %d / 실패 %d · +%d Coins\n잠시 후 다음 배달을 준비합니다.", state.successes, state.failures, state.reward)
@@ -1866,7 +2315,7 @@ function HUD.start()
 		ui.hint.Visible = not collapsed
 		ui.card.Size = UDim2.fromOffset(math.min(300, math.max(190, ui.root.AbsoluteSize.X - 140)), if collapsed then 42 else 142)
 		ui.stats.Position = UDim2.fromOffset(16, if collapsed then 134 else 234)
-		ui.note.Position = UDim2.fromOffset(16, if collapsed then 160 else 260)
+		ui.note.Position = UDim2.fromOffset(16, if collapsed then 182 else 282)
 		ui.toggle.Text = if collapsed then "주문 펼치기" else "주문 접기"
 	end
 	table.insert(connections, ui.toggle.Activated:Connect(function() collapsed = not collapsed; render() end))
@@ -1944,7 +2393,7 @@ return HUD
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="39">
+          <Item class="ModuleScript" referent="45">
             <Properties>
               <string name="Name">InputController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2052,7 +2501,94 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="40">
+          <Item class="ModuleScript" referent="46">
+            <Properties>
+              <string name="Name">ShopController</string>
+              <string name="Source"><![CDATA[--!strict
+local Players=game:GetService("Players")
+local Shared=game:GetService("ReplicatedStorage"):WaitForChild("Shared")
+local Catalog=require(Shared:WaitForChild("Catalogs"))
+local Types=require(Shared:WaitForChild("Types"))
+local Controller={}
+function Controller.start(remote: RemoteEvent)
+	local state: Types.Snapshot?=nil
+	local connections,rows={},{}
+	local gui=Instance.new("ScreenGui")
+	gui.Name,gui.ResetOnSpawn,gui.DisplayOrder,gui.ScreenInsets="MidnightShop",false,20,Enum.ScreenInsets.CoreUISafeInsets
+	gui.Parent=Players.LocalPlayer:WaitForChild("PlayerGui")
+	local function label(parent,text,position,size,fontSize)
+		local l=Instance.new("TextLabel")
+		l.Text,l.Position,l.Size,l.TextSize,l.Parent=text,position,size,fontSize,parent
+		l.BackgroundTransparency,l.TextColor3,l.TextWrapped,l.Font=1,Color3.fromRGB(246,244,235),true,Enum.Font.GothamMedium
+		l.TextXAlignment=Enum.TextXAlignment.Left
+		return l
+	end
+	local function button(parent,text,position,size)
+		local b=Instance.new("TextButton")
+		b.Text,b.Position,b.Size,b.Parent=text,position,size,parent
+		b.BackgroundColor3,b.TextColor3,b.TextSize,b.Font=Color3.fromRGB(255,170,69),Color3.fromRGB(17,25,44),15,Enum.Font.GothamBold
+		local c=Instance.new("UICorner");c.Parent=b
+		return b
+	end
+	local open=button(gui,"꾸미기 상점",UDim2.new(1,-124,0,240),UDim2.fromOffset(112,44))
+	local overlay=Instance.new("Frame")
+	overlay.Size,overlay.BackgroundColor3,overlay.BackgroundTransparency,overlay.Visible,overlay.Parent=UDim2.fromScale(1,1),Color3.fromRGB(5,8,18),0.2,false,gui
+	overlay.Active=true
+	local panel=Instance.new("Frame")
+	panel.Size,panel.AnchorPoint,panel.Position=UDim2.new(1,-24,1,-24),Vector2.new(0.5,0.5),UDim2.fromScale(0.5,0.5)
+	panel.BackgroundColor3,panel.BorderSizePixel,panel.Parent=Color3.fromRGB(27,39,64),0,overlay
+	local limit=Instance.new("UISizeConstraint");limit.MaxSize,limit.Parent=Vector2.new(520,430),panel
+	local corner=Instance.new("UICorner");corner.Parent=panel
+	label(panel,"야식 본부 · 꾸미기",UDim2.fromOffset(14,6),UDim2.new(1,-76,0,32),20)
+	local close=button(panel,"닫기",UDim2.new(1,-68,0,5),UDim2.fromOffset(58,44))
+	local balance=label(panel,"",UDim2.fromOffset(14,42),UDim2.new(1,-28,0,26),15)
+	local note=label(panel,"",UDim2.fromOffset(14,72),UDim2.new(1,-28,0,40),12)
+	local list=Instance.new("ScrollingFrame")
+	list.Position,list.Size,list.BackgroundTransparency,list.BorderSizePixel=UDim2.fromOffset(10,120),UDim2.new(1,-20,1,-130),1,0
+	list.CanvasSize,list.AutomaticCanvasSize,list.ScrollBarThickness,list.Parent=UDim2.new(),Enum.AutomaticSize.Y,5,panel
+	local layout=Instance.new("UIListLayout");layout.Padding,layout.Parent=UDim.new(0,8),list
+	for index,item in Catalog do
+		local card=Instance.new("Frame")
+		card.Size,card.BackgroundColor3,card.BorderSizePixel,card.LayoutOrder,card.Parent=UDim2.new(1,-8,0,84),Color3.fromRGB(40,54,80),0,index,list
+		local c=Instance.new("UICorner");c.Parent=card
+		label(card,item.name,UDim2.fromOffset(10,5),UDim2.new(1,-125,0,28),16)
+		label(card,item.description.." · Lv."..item.level,UDim2.fromOffset(10,35),UDim2.new(1,-125,0,42),12)
+		local action=button(card,"",UDim2.new(1,-112,0,20),UDim2.fromOffset(102,46))
+		rows[item.id]=action
+		table.insert(connections,action.Activated:Connect(function()
+			if not state or state.data.mode~="READY" then return end
+			if state.owned[item.id] then remote:FireServer({kind="EquipCosmetic",roundId=state.roundId,itemId=item.id,enabled=state.equipped[item.slot]~=item.id})
+			elseif state.coins>=item.price and state.level>=item.level then remote:FireServer({kind="PurchaseWithCoins",roundId=state.roundId,itemId=item.id}) end
+		end))
+	end
+	table.insert(connections,open.Activated:Connect(function()overlay.Visible=not overlay.Visible end))
+	table.insert(connections,close.Activated:Connect(function()overlay.Visible=false end))
+	return {
+		update=function(snapshot: Types.Snapshot)
+			state=snapshot
+			open.Visible=snapshot.downUntil<=workspace:GetServerTimeNow() and not snapshot.vehicle.seated
+			if not open.Visible then overlay.Visible=false end
+			balance.Text=string.format("Lv.%d · %d XP · %d Coins",snapshot.level,snapshot.xp,snapshot.coins)
+			note.Text=if snapshot.data.mode=="READY" then (if snapshot.data.dirty then "변경 저장 대기 · 라운드는 계속 진행됩니다" else "Coins 전용 상점 · 라운드는 계속 진행됩니다")
+				elseif snapshot.data.mode=="SAVING" then "저장 중입니다. 잠시 기다려주세요."
+				else "상점 잠김 · 프로필 로딩/저장 연결을 확인하세요. 세션 전용 데이터는 저장하지 않습니다."
+			for _,item in Catalog do
+				local b=rows[item.id]
+				b.AutoButtonColor=snapshot.data.mode=="READY"
+				b.Text=if snapshot.data.mode~="READY" then "잠김"
+					elseif snapshot.owned[item.id] then (if snapshot.equipped[item.slot]==item.id then "해제" else "장착")
+					elseif snapshot.level<item.level then "Lv."..item.level.." 필요"
+					elseif snapshot.coins<item.price then item.price.." Coins\n잔액 부족" else item.price.." Coins"
+			end
+		end,
+		destroy=function()for _,connection in connections do connection:Disconnect()end;gui:Destroy()end,
+	}
+end
+return Controller
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="47">
             <Properties>
               <string name="Name">SpawnController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2089,11 +2625,11 @@ return Controller
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="41">
+        <Item class="Folder" referent="48">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="42">
+          <Item class="ModuleScript" referent="49">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--!strict
@@ -2105,7 +2641,7 @@ return table.freeze({
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="43">
+          <Item class="ModuleScript" referent="50">
             <Properties>
               <string name="Name">UIFactory</string>
               <string name="Source"><![CDATA[--!strict
@@ -2157,8 +2693,8 @@ function Factory.create(playerGui: Instance)
 	toggle.Font, toggle.TextSize, toggle.TextColor3 = Enum.Font.GothamMedium, 14, Theme.Text
 	toggle.BackgroundColor3, toggle.Parent = Theme.Panel, root
 	local corner = Instance.new("UICorner"); corner.Parent = toggle
-	local stats = label(root, "Stats", "", UDim2.fromOffset(16, 234), UDim2.new(1, -32, 0, 22), 14, Theme.Orange)
-	local note = label(root, "Note", Strings.SessionOnly, UDim2.fromOffset(16, 260), UDim2.new(1, -32, 0, 34), 12, Theme.Muted)
+	local stats = label(root, "Stats", "", UDim2.fromOffset(16, 234), UDim2.new(1, -140, 0, 44), 14, Theme.Orange)
+	local note = label(root, "Note", Strings.SessionOnly, UDim2.fromOffset(16, 260), UDim2.new(1, -140, 0, 54), 12, Theme.Muted)
 	local arrow = label(root, "Arrow", "▲", UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(44, 44), 32, Theme.Cyan)
 	arrow.AnchorPoint, arrow.TextXAlignment = Vector2.new(0.5, 0.5), Enum.TextXAlignment.Center
 	local distance = label(root, "Distance", "", UDim2.fromScale(0.5, 0.6), UDim2.fromOffset(210, 32), 14, Theme.Cyan)
@@ -2180,7 +2716,7 @@ return Factory
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="44">
+  <Item class="Workspace" referent="51">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>
