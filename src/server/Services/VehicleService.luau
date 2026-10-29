@@ -9,7 +9,7 @@ Service.__index = Service
 type Actor = { model: Model, seat: VehicleSeat, prompt: ProximityPrompt }
 type Rider = { humanoid: Humanoid, autoRotate: boolean, folder: Folder, connection: RBXScriptConnection }
 type Slot = { actor: Actor, owner: Player?, home: CFrame, frame: CFrame, yaw: number, speed: number,
-	throttle: number, steer: number, inputAt: number, riding: boolean, mountAfter: number, rider: Rider? }
+	throttle: number, steer: number, turn: number, inputAt: number, riding: boolean, mountAfter: number, rider: Rider? }
 type States = { root: (any,Player) -> (BasePart?,Humanoid?), canAct: (any,Player) -> boolean }
 type Store = { slots: { Slot }, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> (),
 	connections: { RBXScriptConnection }, cooldowns: { [Player]: number }, stopped: boolean }
@@ -21,7 +21,7 @@ function Service.new(parent: Instance, states: States, canUse: (Player) -> boole
 		local frame = CFrame.new((id - 2.5) * 12, Config.Map.Spawn.Y + 2, Config.Map.Spawn.Z + 20) * CFrame.Angles(0,math.pi,0)
 		local actor = Factory.create(parent, id, frame)
 		local slot: Slot = { actor = actor, owner = nil, home = frame, frame = frame, yaw = math.pi, speed = 0,
-			throttle = 0, steer = 0, inputAt = 0, riding = false, mountAfter = 0, rider = nil }
+			throttle = 0, steer = 0, turn = 0, inputAt = 0, riding = false, mountAfter = 0, rider = nil }
 		self.slots[id] = slot
 		table.insert(self.connections, actor.prompt.Triggered:Connect(function(player)
 			local root, humanoid = states:root(player)
@@ -43,7 +43,7 @@ function Service.new(parent: Instance, states: States, canUse: (Player) -> boole
 				self:bindRider(slot, humanoid)
 			end
 			slot.riding = humanoid ~= nil
-			slot.throttle, slot.steer, slot.speed = 0, 0, 0
+			slot.throttle, slot.steer, slot.turn, slot.speed = 0, 0, 0, 0
 			self.changed()
 		end))
 	end
@@ -136,7 +136,7 @@ function Service.exit(self: Runtime, player: Player, parkAtHome: boolean?)
 		root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
 		self.authorizedMove(player)
 	end
-	slot.speed, slot.throttle, slot.steer, slot.riding = 0, 0, 0, false
+	slot.speed, slot.throttle, slot.steer, slot.turn, slot.riding = 0, 0, 0, 0, false
 end
 function Service.reset(self: Runtime, player: Player, manual: boolean): boolean
 	local slot = self:slot(player)
@@ -147,7 +147,7 @@ function Service.reset(self: Runtime, player: Player, manual: boolean): boolean
 	self:exit(player,true)
 	-- 용접 제거와 안전 하차를 완료한 뒤 같은 호출에서 복구하여 지연된 재배치가 새 탑승을 덮지 않게 한다.
 	slot.frame, slot.yaw = slot.home, math.pi
-	slot.actor.model:PivotTo(slot.frame)
+	slot.actor.seat.CFrame = slot.frame
 	self.changed()
 	return true
 end
@@ -158,7 +158,7 @@ function Service.remove(self: Runtime, player: Player)
 		slot.owner = nil
 		slot.actor.model:SetAttribute("OwnerUserId", 0)
 		slot.actor.model:SetAttribute("OwnerName", "")
-		slot.actor.model:PivotTo(slot.home)
+		slot.actor.seat.CFrame = slot.home
 		slot.frame, slot.yaw = slot.home, math.pi
 	end
 	self.cooldowns[player] = nil
@@ -203,7 +203,9 @@ function Service.tick(self: Runtime, dt: number)
 		slot.speed = Motion.speed(slot.speed, slot.throttle, dt, Config.Vehicle.MaxSpeed)
 		if math.abs((slot.actor.model:GetAttribute("Speed") or 0) - math.abs(slot.speed)) > 0.5 or slot.speed == 0 then slot.actor.model:SetAttribute("Speed", math.abs(slot.speed)) end
 		if math.abs(slot.speed) < 0.05 then continue end
-		local yaw = slot.yaw - slot.steer * 1.6 * dt * math.sign(slot.speed)
+		-- 10Hz 입력 변화가 즉시 회전 각속도에 튀지 않도록 조향을 완충한다.
+		slot.turn += (slot.steer-slot.turn)*(1-math.exp(-10*dt))
+		local yaw = slot.yaw - slot.turn * 1.6 * dt * math.sign(slot.speed)
 		local frame = CFrame.new(slot.frame.Position) * CFrame.Angles(0,yaw,0)
 		local overlap = OverlapParams.new()
 		overlap.FilterType, overlap.FilterDescendantsInstances, overlap.RespectCanCollide = Enum.RaycastFilterType.Exclude, { slot.actor.model, player.Character }, true
@@ -230,7 +232,8 @@ function Service.tick(self: Runtime, dt: number)
 		-- 도로/차선의 얇은 높이 차이를 즉시 복사하지 않아 좌석과 카메라가 위아래로 튀지 않게 한다.
 		local height = slot.frame.Position.Y + (targetY-slot.frame.Position.Y)*(1-math.exp(-Config.Vehicle.GroundResponse*dt))
 		slot.yaw, slot.frame = yaw, CFrame.new(proposed.X, height, proposed.Z) * CFrame.Angles(0,yaw,0)
-		slot.actor.model:PivotTo(slot.frame)
+		-- 용접된 어셈블리의 기준 좌석만 이동한다. Model:PivotTo의 부품별 재배치와 좌석 용접의 중복 보정을 피한다.
+		slot.actor.seat.CFrame = slot.frame
 	end
 end
 function Service.destroy(self: Runtime)

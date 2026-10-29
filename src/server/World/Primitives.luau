@@ -13,6 +13,8 @@ end
 
 function Primitives.sign(parent: Instance, text: string, frame: CFrame, size: Vector3, color: Color3, doubleSided: boolean?): Part
 	local part = Primitives.part(parent, "Sign", size, frame, Color3.fromRGB(17, 25, 44))
+	-- 안내판은 정보 표시용이다. 도보/차량/카메라 광선을 막는 보이지 않는 벽이 되지 않게 한다.
+	part.CanCollide, part.CanTouch, part.CanQuery = false, false, false
 	local surface = Instance.new("SurfaceGui")
 	surface.Face, surface.PixelsPerStud = Enum.NormalId.Front, 36
 	surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud

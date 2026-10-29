@@ -30,6 +30,9 @@ local module=luau.load(fs.readFile("src/client/Controllers/AudioController.luau"
 local audio=module.start()
 local byName={};for _,s in sounds do if s.Name then byName[s.Name]=s end end
 assert(characterSound.SoundGroup==groups[1] and byName.Wind.Playing)
+audio.cue("Knock");assert(byName.Knock.plays==1 and byName.Knock.TimePosition==0 and not byName.Knock.Looped)
+audio.cue(nil);audio.cue("Motor");assert(byName.Knock.plays==1 and not byName.Motor.Playing,"only an explicit server knock cue is accepted")
+audio.cue("Knock");assert(byName.Knock.plays==2,"each accepted knock restarts the short hit")
 for name,definition in catalog do
 	assert(definition.volume<=0.4)
 	if name=="Motor"then assert(definition.id=="rbxassetid://6002661882","engine must use the sourced engine loop, never a footsteps sample")

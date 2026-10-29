@@ -1,5 +1,9 @@
 # 차량 엔진음 출처와 확인 범위
 
+## 추가: 노크 타격음
+
+노크에는 기존 Roblox 내장 `rbxasset://sounds/action_jump_land.mp3`를 pitch 1.3/volume 0.4의 단발 타격음으로 사용합니다. 문 녹음/외부 업로드가 아니며 실제 청취는 Studio 미검증입니다. 서버가 거리/참가/쿨다운을 검사해 인정한 노크만 근처 클라이언트로 전달합니다. 전역 음소거를 따릅니다.
+
 기존 `Motor`는 `rbxasset://sounds/action_footsteps_plastic.mp3`를 반복 재생했습니다. 이를 엔진 루프 `rbxassetid://6002661882` 참조로 교체했습니다. ID를 추측하지 않고 아래 공개 차량 모델을 내려받아 Sound의 AudioContent를 읽어 확인했습니다.
 
 - 출처: [A-Chassis 1.7.2 stable 릴리스](https://github.com/lisphm/A-Chassis/releases/tag/v1.7.2-stable), `A-Chassis.1.7.2.rbxm`.

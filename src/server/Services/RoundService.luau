@@ -124,13 +124,17 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		if not result then return end
 		monsters:stop()
 		if result.success then award(result.reward, result.index) end
-		feedback(result.reason .. (if result.success then " · +" .. result.reward .. " Coins" else " · 다음 주문으로 진행"))
+		local message = result.reason .. (if result.success then " · +" .. result.reward .. " Coins" else "")
 		table.clear(holds)
 		if not orders:advance(now()) then
 			playerStates:clearRound()
 			if orders.successes == 3 then award(120, 4) end
 			model:finish(now(), string.format("배달 %d/3 성공 · %d건 실패", orders.successes, orders.failures))
+		else
+			local nextOrder = orders:current()
+			if nextOrder then message ..= " · 다음 배달: " .. nextOrder.title end
 		end
+		feedback(message)
 	end
 	local function add(player: Player)
 		economy:add(player)
@@ -192,7 +196,14 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 			local hold = holds[player]
 			local heldFor = if hold and hold.index == orders.index and hold.destination == id then timestamp - hold.began else 0
 			holds[player] = nil
+			local previousKnocks = orders.knocks
 			if orders:interact(id, player.UserId, timestamp, heldFor) then
+				-- 거리/상태/쿨다운을 통과해 서버가 센 노크만 알린다. 스냅샷 재전송으로 소리가 중복되지 않는다.
+				if orders.knocks > previousKnocks then
+					for _, listener in Players:GetPlayers() do
+						if inRange(listener,destination) then remotes.Feedback:FireClient(listener,"노크 " .. orders.knocks .. "/3", "Knock") end
+					end
+				end
 				if orders.stage == "HOLDING" then feedback("뒤돌아보지 마세요! 캐릭터가 문을 향한 채 4초 유지")
 				elseif orders.stage == "COOLDOWN" then
 					feedback("가짜 집이 깨어났습니다! 도망치세요")

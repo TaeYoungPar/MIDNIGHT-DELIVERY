@@ -45,6 +45,12 @@ assert(first.spawn.CFrame.LookVector:Dot(r.Vector3.new(0,0,1)) > 0.99, "Spawn mu
 assert(not first.prompt.Enabled and math.abs(first.prompt.HoldDuration - 0.6) < 0.001)
 assert((first.target - r.Vector3.new(-105, 6, -1.5)).Magnitude < 0.001)
 local nav = first.world.Roads.BlueHouseGuide
+for _, part in nav:GetDescendants() do
+	if part:IsA("BasePart") then assert(not part.CanCollide and not part.CanTouch and not part.CanQuery,"blue-house guide must never block walking, driving, or camera casts") end
+end
+for _, part in first.world:GetDescendants() do
+	if part:IsA("BasePart") and part.Name=="Sign" then assert(not part.CanCollide and not part.CanQuery,"decorative signs are not walls") end
+end
 local wanted = first.target - nav.ArrowShaft.CFrame.Position
 local flat = r.Vector3.new(wanted.X, 0, wanted.Z).Unit
 assert(nav.ArrowShaft.CFrame.LookVector:Dot(flat) > 0.99, "3D arrow must point to the actual blue house")

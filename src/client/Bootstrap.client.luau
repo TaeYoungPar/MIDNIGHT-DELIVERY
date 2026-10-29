@@ -26,7 +26,10 @@ local function update(snapshot)
 	settings.update(snapshot);hud.update(snapshot); controls.update(snapshot); audio.update(snapshot); shop.update(snapshot);tutorial.update(snapshot)
 end
 local stateConnection = stateRemote.OnClientEvent:Connect(update)
-local feedbackConnection = feedbackRemote.OnClientEvent:Connect(hud.feedback)
+local feedbackConnection = feedbackRemote.OnClientEvent:Connect(function(message, cue)
+	hud.feedback(message)
+	audio.cue(cue)
+end)
 -- 이벤트를 먼저 구독하여 초기 스냅샷 도중 발생한 상태 전환을 놓치지 않는다.
 task.spawn(function()
 	for attempt = 1, 3 do

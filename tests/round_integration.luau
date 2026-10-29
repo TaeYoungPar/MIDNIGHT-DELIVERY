@@ -59,8 +59,9 @@ for index, id in {"ghost_house", "giant_house", "fake_1", "fake_2", "fake_3"} do
 		prompt = { Triggered = signal(), PromptButtonHoldBegan = signal() } }
 end
 local snapshots = {}
+local feedbackEvents = {}
 local remotes = { State = {FireClient = function(_, p, snapshot) snapshots[p.UserId] = snapshot end},
-	Feedback = {FireClient = function() end}, Snapshot = {}, Action = {OnServerEvent = signal()} }
+	Feedback = {FireClient = function(_,player,message,cue)table.insert(feedbackEvents,{player=player,message=message,cue=cue})end}, Snapshot = {}, Action = {OnServerEvent = signal()} }
 local p = makePlayer(1); table.insert(players, p)
 local chaseKinds = {}
 local stateStub = {
@@ -109,10 +110,18 @@ step(30); assert(snapshots[1].phase == "PLAYING" and snapshots[1].orderIndex == 
 local spectator = makePlayer(2); table.insert(players, spectator); added:Fire(spectator)
 assert(not snapshots[2].participant)
 move("ghost_house"); step(35)
-trigger("ghost_house"); step(36); trigger("ghost_house"); step(37); trigger("ghost_house")
+local function knocks()
+	local count=0;for _,event in feedbackEvents do if event.cue=="Knock"and event.player==p then count+=1 end end;return count
+end
+assert(knocks()==0)
+trigger("ghost_house");assert(knocks()==1)
+trigger("ghost_house");assert(knocks()==1,"spam/rejected knocks must be silent")
+world.destinations.ghost_house.prompt.Triggered:Fire(spectator);assert(knocks()==1,"spectator cannot trigger a knock")
+step(36); trigger("ghost_house"); step(37); trigger("ghost_house");assert(knocks()==3)
 assert(snapshots[1].stage == "HOLDING")
 step(41.1)
 assert(snapshots[1].orderIndex == 2 and p:GetAttribute("Coins") == 80)
+assert(string.find(feedbackEvents[#feedbackEvents].message,"다음 배달: 거인",1,true),"completion must name the next destination")
 assert(spectator:GetAttribute("Coins") == 0)
 move("giant_house"); step(42); trigger("giant_house")
 assert(snapshots[1].orderIndex == 3 and p:GetAttribute("Coins") == 160)

@@ -44,10 +44,14 @@ local function setup()
 				Destroy=function(w)w.destroyed=true end})
 			changed:Fire()
 		end
-		actor.model.PivotTo=function(_,cf)
+		local function moveAssembly(cf)
 			actor.seat.Position=cf.Position
 			for _,p in players do if p.humanoid.SeatPart==actor.seat and p.humanoid.Sit then p.root.Position=cf.Position+r.Vector3.new(0,2,0) end end
 		end
+		setmetatable(actor.seat,{__newindex=function(self,key,value)
+			if key=="CFrame" then moveAssembly(value) else rawset(self,key,value) end
+		end})
+		actor.model.PivotTo=function()error("move the welded seat once, not every model part")end
 		actor.prompt={Triggered=signal()};table.insert(actors,actor);return actor
 	end}
 	local playerService={GetPlayers=function()return players end,GetPlayerFromCharacter=function(_,char)for _,p in players do if p.Character==char then return p end end;return nil end}
@@ -173,6 +177,10 @@ test("physics frames advance immediately instead of dropping alternating render 
 		assert((slot.frame.Position-previous).Magnitude>0,"every physics frame must move the seat")
 		previous=slot.frame.Position
 	end
+	f.s:input(f.a,1,1);local yaw=slot.yaw;f.s:tick(1/60)
+	assert(slot.turn>0 and slot.turn<1,"a steering edge must ease instead of snapping")
+	assert(math.abs(slot.yaw-yaw)<1.6/60,"first steering frame must not jump to full angular speed")
+	f.s:exit(f.a);assert(slot.turn==0,"remount must not inherit steering momentum")
 	f.s:destroy()
 end)
 test("road height is damped and other cars and riders cannot become ground",function()

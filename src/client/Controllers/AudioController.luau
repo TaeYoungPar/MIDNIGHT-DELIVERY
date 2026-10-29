@@ -102,6 +102,10 @@ function Controller.start(settings)
 		end
 	end))
 	return {
+		-- 서버 Feedback의 명시적인 노크 이벤트만 소비한다. 클라이언트 문 상호작용으로 보상을 결정하지 않는다.
+		cue = function(name: string?)
+			if name == "Knock" then play("Knock") end
+		end,
 		update = function(snapshot: Types.Snapshot)
 			if previous then
 				if snapshot.coins > previous.coins then play("Success")

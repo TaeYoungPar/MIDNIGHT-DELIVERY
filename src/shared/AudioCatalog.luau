@@ -9,4 +9,6 @@ return table.freeze({
 	Recover = { id = "rbxasset://sounds/action_get_up.mp3", volume = 0.35, pitch = 1 },
 	Wind = { id = "rbxasset://sounds/action_falling.mp3", volume = 0.04, pitch = 0.65 },
 	Motor = { id = "rbxassetid://6002661882", volume = 0.18, pitch = 0.85 },
+	-- 업로드 없이 재생하는 짧은 타격음. 실제 문 녹음 대신 내장 충격음을 노크용으로 사용한다.
+	Knock = { id = "rbxasset://sounds/action_jump_land.mp3", volume = 0.4, pitch = 1.3 },
 })

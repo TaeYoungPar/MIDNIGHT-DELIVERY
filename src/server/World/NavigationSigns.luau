@@ -18,6 +18,9 @@ function Navigation.create(parent: Instance, name: string, position: Vector3, ta
 		head.CanCollide = false
 	end
 	P.sign(model, "01 · 파란 지붕집", CFrame.new(position + Vector3.new(0, 6, 0)), Vector3.new(22, 4, 0.6), color, true)
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then part.CanCollide, part.CanTouch, part.CanQuery = false, false, false end
+	end
 	return model
 end
 return Navigation
