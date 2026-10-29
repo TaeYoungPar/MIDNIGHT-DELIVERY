@@ -11,13 +11,15 @@ local function signal()
 end
 local function setup()
 	local clock, wall, overlap, ground = 0,false,false,true
+	local boxBlocked = function() return false end
 	local deferred, players, actors = {},{},{}
 	local heartbeat=signal()
 	local function player(id)
 		local p={UserId=id,DisplayName="Tester"..id, allowed=true, down=false}
 		p.root={Position=r.Vector3.new(0,5,-99)}
-		p.humanoid={Sit=false}
+		p.humanoid={Sit=false,ChangeState=function(self,state)self.state=state end}
 		p.Character={IsA=function()return true end,PivotTo=function(_,cf)p.root.Position=cf.Position end}
+		p.root.IsDescendantOf=function(_,char)return char==p.Character end
 		p.humanoid.Parent=p.Character
 		table.insert(players,p);return p
 	end
@@ -28,8 +30,16 @@ local function setup()
 		local changed=signal()
 		local actor={}
 		actor.model={FindFirstChild=function()return nil end,SetAttribute=function(_,k,v)attrs[k]=v end,GetAttribute=function(_,k)return attrs[k]end, Destroy=function(self)self.destroyed=true end}
-		actor.seat={Position=frame.Position,GetPropertyChangedSignal=function()return changed end,FindFirstChild=function()return nil end}
-		actor.seat.Sit=function(self,h)self.Occupant=h;h.SeatPart=self;h.Sit=true;changed:Fire()end
+		local welds={}
+		actor.seat={Position=frame.Position,GetPropertyChangedSignal=function()return changed end,GetChildren=function()
+			local live={};for _,w in welds do if not w.destroyed then table.insert(live,w)end end;return live end}
+		actor.seat.Sit=function(self,h)
+			self.Occupant=h;h.SeatPart=self;h.Sit=true
+			local p=if h==a.humanoid then a else b
+			table.insert(welds,{Name="SeatWeld",IsA=function(_,name)return name=="Weld"end,Part1=p.root,
+				Destroy=function(w)w.destroyed=true end})
+			changed:Fire()
+		end
 		actor.model.PivotTo=function(_,cf)
 			actor.seat.Position=cf.Position
 			for _,p in players do if p.humanoid.SeatPart==actor.seat and p.humanoid.Sit then p.root.Position=cf.Position+r.Vector3.new(0,2,0) end end
@@ -45,8 +55,11 @@ local function setup()
 		Vector3=r.Vector3,CFrame=r.CFrame,Enum=r.Enum,
 		RaycastParams={new=function()return{}end},OverlapParams={new=function()return{}end},
 		workspace={GetServerTimeNow=function()return clock end,Blockcast=function()return if wall then {}else nil end,
-			GetPartBoundsInBox=function()return if overlap then {{}}else{}end,
-			Raycast=function(_,origin)return if ground then{Position=r.Vector3.new(origin.X,0,origin.Z)}else nil end},
+			GetPartBoundsInBox=function(_,cf)return if overlap or boxBlocked(cf) then {{}}else{}end,
+			Raycast=function(_,origin,direction)
+				if direction.Y > -20 then return nil end
+				return if ground then{Position=r.Vector3.new(origin.X,0,origin.Z),Normal=r.Vector3.yAxis}else nil
+			end},
 		task={defer=function(fn)table.insert(deferred,fn)end},
 	}})()
 	local moved=0
@@ -54,6 +67,7 @@ local function setup()
 	s:add(a);s:add(b)
 	return{s=s,a=a,b=b,actors=actors,players=players,heartbeat=heartbeat,
 		time=function(v)clock=v end,wall=function(v)wall=v end,overlap=function(v)overlap=v end,ground=function(v)ground=v end,
+		boxBlocked=function(fn)boxBlocked=fn end,
 		flush=function()local pending=deferred;deferred={};for _,fn in pending do fn()end end,
 		moved=function()return moved end,
 		mount=function(p)local slot=s:slot(p);p.root.Position=slot.actor.seat.Position;slot.actor.prompt.Triggered:Fire(p)end}
@@ -112,7 +126,36 @@ test("missing ground resets scooter; departure releases and reassigns slot",func
 	assert(f.s:slot(f.a).frame==f.s:slot(f.a).home and not f.a.humanoid.Sit)
 	local old=f.s:slot(f.a);f.s:remove(f.a);assert(old.owner==nil and f.s:slot(f.b)~=nil);f.s:destroy()
 end)
-test("deferred reset cannot move a destroyed service or reassigned slot",function()
-	local f=setup();f.mount(f.a);f.s:reset(f.a,true);f.s:destroy();f.flush();assert(f.moved()==0)
+test("exit destroys even a stale SeatWeld before moving the rider to safe ground",function()
+	local f=setup();f.mount(f.a);local slot=f.s:slot(f.a)
+	local weld=slot.actor.seat:GetChildren()[1]
+	-- Occupant/SeatPart가 먼저 비어도 실제 용접이 남은 경우를 재현한다.
+	slot.actor.seat.Occupant=nil;f.a.humanoid.SeatPart=nil
+	f.s:exit(f.a)
+	assert(weld.destroyed and not f.a.humanoid.Sit and f.a.humanoid.state==r.Enum.HumanoidStateType.GettingUp)
+	assert(math.abs((f.a.root.Position-slot.frame.Position).Magnitude-6)<0.1)
+	assert(f.a.root.AssemblyLinearVelocity==r.Vector3.zero and f.moved()==1)
+	local position=f.a.root.Position;f.s:exit(f.a)
+	assert(f.moved()==1 and f.a.root.Position==position,"on-foot exit must not teleport")
+	f.s:destroy()
+end)
+test("blocked side uses another exit; completely blocked exits return to HQ",function()
+	local f=setup();f.mount(f.a);local slot=f.s:slot(f.a)
+	local first=slot.frame:PointToWorldSpace(r.Vector3.new(6,0,0))
+	f.boxBlocked(function(cf)return math.abs(cf.Position.X-first.X)<0.1 end)
+	f.s:exit(f.a)
+	local second=slot.frame:PointToWorldSpace(r.Vector3.new(-6,0,0))
+	assert(math.abs(f.a.root.Position.X-second.X)<0.01)
+	f.s:destroy()
+	local g=setup();g.mount(g.a);g.overlap(true);g.s:exit(g.a)
+	assert(g.a.root.Position==r.Vector3.new(0,5,-119));g.s:destroy()
+end)
+test("exit briefly rejects remount; reset cannot schedule a later rider teleport",function()
+	local f=setup();f.mount(f.a);local seat=f.s:slot(f.a).actor.seat
+	f.s:exit(f.a);seat.Occupant=nil;f.a.humanoid.SeatPart=nil
+	f.mount(f.a);assert(not f.a.humanoid.Sit)
+	f.time(1);f.mount(f.a);assert(f.a.humanoid.Sit)
+	f.s:reset(f.a,true);local before=f.a.root.Position;f.s:destroy();f.flush()
+	assert(f.a.root.Position==before and f.moved()==2)
 end)
 print(string.format("%d P4 vehicle/movement tests passed (mocked seat, casts and physics; not Studio)",tests))

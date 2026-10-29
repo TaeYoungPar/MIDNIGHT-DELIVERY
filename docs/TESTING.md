@@ -1,6 +1,6 @@
 # 검증 기록과 Studio 절차
 
-현재 빌드는 P6입니다. 최신 검사 기록은 맨 아래 P6 절입니다. 사용자 수동 확인은 별도 **[USER_VERIFICATION.md](USER_VERIFICATION.md)**에 모았습니다. 앞부분은 이전 단계 당시 기록입니다.
+현재 빌드는 P6 스쿠터 수정판입니다. 최신 검사 기록은 맨 아래 스쿠터 수정 절입니다. 사용자 수동 확인은 별도 **[USER_VERIFICATION.md](USER_VERIFICATION.md)**에 모았습니다. 앞부분은 이전 단계 당시 기록입니다.
 
 2026-10-28. 자동 검사 결과와 엔진 실행 결과를 구분합니다.
 
@@ -157,3 +157,13 @@ UpdateAsync 콜백은 재호출 가능/return nil 취소/내부 yield 금지 조
 - Luau 컴파일/핵심 순수 모델 타입/Rojo **43개 소스** 포함·일치 PASS. 직접 rbxlx 배포 유지.
 
 실제 검증은 `docs/USER_VERIFICATION.md`, 남은 출시 게이트는 `docs/RELEASE_READINESS.md`. 원본 QA 체크리스트는 이 대역 검사만으로 완료 표시하지 않습니다.
+
+## 2026-10-29 — 사용자 스쿠터 피드백 수정
+
+사용자 실제 보고: 이전 파일에서 탑승 시점 이상, 자기 차량 구분 어려움, 하차 불가. 이 보고는 실패 증거로 남기며 수정 후 실제 Studio 재검증은 아직 받지 못했습니다.
+
+- `tests/vehicles.luau`: 기존 10개에서 12개로 변경. stale Occupant/SeatPart와 남은 SeatWeld, 해제 후 GettingUp/속도 초기화/안전 위치/서버 이동 승인, 중복 하차 비이동, 한쪽 막힘과 전체 막힘 본부 폴백, 1초 재탑승 제한, 지연 재배치 없는 복구 검사 PASS. 실제 물리 대신 좌석/캐스트 대역입니다.
+- `tests/vehicle_client.luau`: 실제 VehicleController/InputController를 로드하여 소유별 이름표·Highlight·로컬 프롬프트·소유권 변경, 후방 카메라 위치·보간·벽 앞 거리·하차/사망/종료 해제, 높은 우선순위 X/Space 입력·도보/채팅 통과·112×56 터치 버튼·이벤트 정리 검사 PASS. 실제 픽셀/터치/네트워크 복제 검사가 아닙니다.
+- 전체 `tools/verify.sh`: 번호 있는 로직/대역 73개 및 컨트롤러/통합/월드 검사 PASS. 컴파일·순수 모델 타입·Rojo 44개 소스 포함 검사 PASS. `tools/package.py`로 직접 rbxlx 복사/내용 검사.
+- Roblox 공식 creator-docs의 Camera/VehicleSeat 문서에서 Scriptable/CameraSubject/Sit/Occupant 동작을 확인했습니다. 실제 API 호출 실행 성공을 뜻하지 않습니다.
+- 수동 재현: `USER_VERIFICATION.md`의 맨 앞 스쿠터 3분 점검을 따릅니다. 최신 파일에서 탑승 → X/Space/버튼 각각 하차 → 다시 이동, 주행/벽 옆 하차, 기본 카메라 복귀를 우선 확인합니다. PC/모바일/2인·4인과 R6/R15·지연 QA는 아직 필요합니다.

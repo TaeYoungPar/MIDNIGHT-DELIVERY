@@ -44,7 +44,7 @@ return table.freeze({
           <string name="Source"><![CDATA[--!strict
 -- 타이머와 보상은 서버에서도 같은 설정을 사용한다. 주문 3건의 제한과 고객별 조건도 중앙에서 관리한다.
 return table.freeze({
-	Build = "P6 접근성·안내·마감 / 출시 QA 대기",
+	Build = "P6 스쿠터 카메라·소유 표시·하차 수정 / 실제 재검증 대기",
 	Round = table.freeze({ Waiting = 20, Preparing = 10, Playing = 420, Results = 15, MaxPlayers = 4 }),
 	Delivery = table.freeze({ Reward = 80, XP = 20, Distance = 12, Cooldown = 0.6 }),
 	Orders = table.freeze({ Duration = 120, GhostHold = 4, GhostCooldown = 10, GiantHot = 90, GiantCalm = 3, FakeLock = 10 }),
@@ -112,7 +112,7 @@ return table.freeze({
           <string name="Source"><![CDATA[--!strict
 return table.freeze({
 	{title="1 / 주문부터 확인",body="로비 20초와 준비 10초 뒤 자동 시작합니다.\n중도 입장은 다음 판부터 합류합니다. 왼쪽 주문 카드를 펼쳐 규칙을 읽으세요."},
-	{title="2 / 자기 스쿠터로 출발",body="본부 앞 자기 이름의 스쿠터에 E/터치로 탑승.\nWASD 또는 모바일 방향 버튼으로 운전하고 스페이스/하차로 내리세요."},
+	{title="2 / 자기 스쿠터로 출발",body="본부 앞 민트빛 표시의 ‘내 스쿠터’에 E/터치로 탑승.\nWASD 또는 방향 버튼으로 운전하고 X·Space 또는 오른쪽 하차 버튼으로 내리세요."},
 	{title="3 / 현관에서 규칙 지키기",body="유령은 3회 노크 후 4초 정면 유지, 거인은 식기 전에 배달.\n외곽 집은 우편함 단서로 찾습니다. 잡히면 팀원 구조 또는 12초 뒤 복귀!"},
 })
 ]]></string>
@@ -1643,7 +1643,7 @@ local Service = {}
 Service.__index = Service
 type Actor = { model: Model, seat: VehicleSeat, prompt: ProximityPrompt }
 type Slot = { actor: Actor, owner: Player?, home: CFrame, frame: CFrame, yaw: number, speed: number,
-	throttle: number, steer: number, inputAt: number, riding: boolean }
+	throttle: number, steer: number, inputAt: number, riding: boolean, mountAfter: number }
 type States = { root: (any,Player) -> (BasePart?,Humanoid?), canAct: (any,Player) -> boolean }
 type Store = { slots: { Slot }, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> (),
 	connections: { RBXScriptConnection }, cooldowns: { [Player]: number }, stopped: boolean, elapsed: number }
@@ -1655,12 +1655,13 @@ function Service.new(parent: Instance, states: States, canUse: (Player) -> boole
 		local frame = CFrame.new((id - 2.5) * 12, Config.Map.Spawn.Y + 2, Config.Map.Spawn.Z + 20) * CFrame.Angles(0,math.pi,0)
 		local actor = Factory.create(parent, id, frame)
 		local slot: Slot = { actor = actor, owner = nil, home = frame, frame = frame, yaw = math.pi, speed = 0,
-			throttle = 0, steer = 0, inputAt = 0, riding = false }
+			throttle = 0, steer = 0, inputAt = 0, riding = false, mountAfter = 0 }
 		self.slots[id] = slot
 		table.insert(self.connections, actor.prompt.Triggered:Connect(function(player)
 			local root, humanoid = states:root(player)
 			if slot.owner ~= player or not self.canUse(player) or not states:canAct(player) or not root or not humanoid
-				or humanoid.SeatPart or (root.Position - actor.seat.Position).Magnitude > 8 then return end
+				or humanoid.SeatPart or workspace:GetServerTimeNow() < slot.mountAfter
+				or (root.Position - actor.seat.Position).Magnitude > 8 then return end
 			actor.seat:Sit(humanoid)
 		end))
 		table.insert(self.connections, actor.seat:GetPropertyChangedSignal("Occupant"):Connect(function()
@@ -1697,21 +1698,53 @@ function Service.add(self: Runtime, player: Player)
 		if not slot.owner then
 			slot.owner = player
 			slot.actor.model:SetAttribute("OwnerUserId", player.UserId)
+			slot.actor.model:SetAttribute("OwnerName", player.DisplayName)
 			slot.actor.prompt.ObjectText = player.DisplayName .. "의 스쿠터"
 			self:skin(player,"")
 			return
 		end
 	end
 end
-function Service.exit(self: Runtime, player: Player)
+-- 벽/바닥을 검사해 좌우·뒤·앞 순서로 하차 지점을 찾는다. 막혔으면 본부의 안전한 스폰으로 복귀한다.
+function Service.exitFrame(self: Runtime, slot: Slot, player: Player, parkAtHome: boolean?): CFrame
+	local base = if parkAtHome then slot.home else slot.frame
+	local params, overlap = RaycastParams.new(), OverlapParams.new()
+	params.FilterType, params.FilterDescendantsInstances, params.RespectCanCollide = Enum.RaycastFilterType.Exclude, {slot.actor.model, player.Character}, true
+	overlap.FilterType, overlap.FilterDescendantsInstances, overlap.RespectCanCollide = Enum.RaycastFilterType.Exclude, {slot.actor.model, player.Character}, true
+	for _, offset in {Vector3.new(6,0,0),Vector3.new(-6,0,0),Vector3.new(0,0,8),Vector3.new(0,0,-8)} do
+		local point = base:PointToWorldSpace(offset)
+		local ground = workspace:Raycast(point + Vector3.new(0,8,0), Vector3.new(0,-30,0), params)
+		if not ground or ground.Normal.Y < 0.65 or ground.Position.Y > base.Position.Y + 2 then continue end
+		local position = ground.Position + Vector3.new(0,3.2,0)
+		local origin = base.Position + Vector3.new(0,2,0)
+		if workspace:Raycast(origin, position-origin, params) then continue end
+		local frame = CFrame.new(position) * base.Rotation
+		if #workspace:GetPartBoundsInBox(frame,Vector3.new(4,5.5,4),overlap) == 0 then return frame end
+	end
+	return CFrame.new(Config.Map.Spawn + Vector3.new(0,4,0)) * CFrame.Angles(0,math.pi,0)
+end
+function Service.exit(self: Runtime, player: Player, parkAtHome: boolean?)
 	local slot = self:slot(player)
 	if not slot then return end
-	local occupant = slot.actor.seat.Occupant
 	local character = player.Character
-	if occupant and character and occupant.Parent == character then
-		occupant.Sit = false
-		local weld = slot.actor.seat:FindFirstChild("SeatWeld")
-		if weld and weld:IsA("Weld") and ((weld.Part1 and weld.Part1:IsDescendantOf(character)) or (weld.Part0 and weld.Part0:IsDescendantOf(character))) then weld:Destroy() end
+	local root, humanoid = self.states:root(player)
+	local seat = slot.actor.seat
+	local attached = humanoid ~= nil and humanoid.Sit and (seat.Occupant == humanoid or humanoid.SeatPart == seat)
+	-- Occupant는 Sit=false보다 늦게 복제될 수 있다. 소유 캐릭터의 용접을 먼저 찾아 제거한다.
+	for _, weld in seat:GetChildren() do
+		if weld.Name == "SeatWeld" and weld:IsA("Weld") and character
+			and ((weld.Part1 and weld.Part1:IsDescendantOf(character)) or (weld.Part0 and weld.Part0:IsDescendantOf(character))) then
+			attached = true
+			weld:Destroy()
+		end
+	end
+	if attached and character and root and humanoid then
+		slot.mountAfter = workspace:GetServerTimeNow() + 1
+		humanoid.Sit, humanoid.Jump = false, false
+		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		character:PivotTo(self:exitFrame(slot,player,parkAtHome))
+		root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
+		self.authorizedMove(player)
 	end
 	slot.speed, slot.throttle, slot.steer, slot.riding = 0, 0, 0, false
 end
@@ -1721,18 +1754,10 @@ function Service.reset(self: Runtime, player: Player, manual: boolean): boolean
 	local timestamp = workspace:GetServerTimeNow()
 	if manual and (not self.canUse(player) or not self.states:canAct(player) or timestamp < (self.cooldowns[player] or 0)) then return false end
 	if manual then self.cooldowns[player] = timestamp + Config.Vehicle.ResetCooldown end
-	local wasRiding = slot.riding
-	self:exit(player)
-	-- 소유자의 SeatWeld를 제거한 뒤 복구한다. 서버 내 지연 작업은 소유권/종료 상태를 재검사한다.
-	task.defer(function()
-		if self.stopped or slot.owner ~= player then return end
-		slot.frame, slot.yaw = slot.home, math.pi
-		slot.actor.model:PivotTo(slot.frame)
-		if wasRiding and player.Character then
-			player.Character:PivotTo(slot.home * CFrame.new(5,2,0))
-			self.authorizedMove(player)
-		end
-	end)
+	self:exit(player,true)
+	-- 용접 제거와 안전 하차를 완료한 뒤 같은 호출에서 복구하여 지연된 재배치가 새 탑승을 덮지 않게 한다.
+	slot.frame, slot.yaw = slot.home, math.pi
+	slot.actor.model:PivotTo(slot.frame)
 	self.changed()
 	return true
 end
@@ -1742,6 +1767,7 @@ function Service.remove(self: Runtime, player: Player)
 		self:exit(player)
 		slot.owner = nil
 		slot.actor.model:SetAttribute("OwnerUserId", 0)
+		slot.actor.model:SetAttribute("OwnerName", "")
 		slot.actor.model:PivotTo(slot.home)
 		slot.frame, slot.yaw = slot.home, math.pi
 	end
@@ -2057,6 +2083,7 @@ function Factory.create(parent: Instance, id: number, frame: CFrame)
 	model.Name = "Scooter" .. id
 	model:SetAttribute("VehicleId", id)
 	model:SetAttribute("OwnerUserId", 0)
+	model:SetAttribute("OwnerName", "")
 	local orange = Color3.fromRGB(255, 170, 69)
 	local navy = Color3.fromRGB(27, 39, 64)
 	local seat = Instance.new("VehicleSeat")
@@ -2079,7 +2106,8 @@ function Factory.create(parent: Instance, id: number, frame: CFrame)
 	attach.Position, attach.Parent = Vector3.new(0,1.5,-1), seat
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.ActionText, prompt.ObjectText, prompt.HoldDuration = "스쿠터 탑승", "배달 스쿠터 " .. id, 0.3
-	prompt.MaxActivationDistance, prompt.RequiresLineOfSight, prompt.Parent = 8, true, attach
+	-- 차체/배달 상자에 프롬프트 시야가 가려지지 않게 한다. 실제 거리·소유권은 서버에서 다시 검증한다.
+	prompt.MaxActivationDistance, prompt.RequiresLineOfSight, prompt.Parent = 8, false, attach
 	model.PrimaryPart, model.Parent = seat, parent
 	return { model = model, seat = seat, prompt = prompt }
 end
@@ -2245,6 +2273,7 @@ local snapshotRemote = folder:WaitForChild(Names.Snapshot)
 local settings=require(script.Parent.Controllers.SettingsController).start(folder:WaitForChild(Names.Action))
 local disconnectSettings=settings.subscribe(hud.configure)
 local controls = require(script.Parent.Controllers.InputController).start(folder:WaitForChild(Names.Action),settings)
+local vehicle = require(script.Parent.Controllers.VehicleController).start()
 local audio = require(script.Parent.Controllers.AudioController).start(settings)
 local shop = require(script.Parent.Controllers.ShopController).start(folder:WaitForChild(Names.Action),settings)
 local tutorial=require(script.Parent.Controllers.TutorialController).start(folder:WaitForChild(Names.Action),settings)
@@ -2272,6 +2301,7 @@ script.Destroying:Connect(function()
 	disconnectSettings()
 	shop.destroy()
 	controls.destroy()
+	vehicle.destroy()
 	audio.destroy()
 	settings.destroy()
 	hud.destroy()
@@ -2547,6 +2577,7 @@ return HUD
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local Actions = game:GetService("ContextActionService")
 local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
 local Controller = {}
 function Controller.start(remote: RemoteEvent,settings)
@@ -2556,6 +2587,7 @@ function Controller.start(remote: RemoteEvent,settings)
 	local connections, inputs, held = {}, {}, {}
 	local gui = Instance.new("ScreenGui")
 	gui.Name, gui.ResetOnSpawn, gui.ScreenInsets = "MidnightControls", false, Enum.ScreenInsets.CoreUISafeInsets
+	gui.DisplayOrder = 20
 	gui.Parent = player:WaitForChild("PlayerGui")
 	local drive = Instance.new("Frame")
 	drive.BackgroundTransparency, drive.Size, drive.AnchorPoint = 1, UDim2.fromOffset(164,104), Vector2.new(0.5,1)
@@ -2587,7 +2619,17 @@ function Controller.start(remote: RemoteEvent,settings)
 	holdButton(drive,"→", "Right",UDim2.fromOffset(112,54))
 	local sprint = holdButton(gui,"달리기","Sprint",UDim2.new(1,-82,1,-160))
 	sprint.Size = UDim2.fromOffset(70,48)
-	local leave = button(gui,"하차",UDim2.new(1,-82,1,-160),UDim2.fromOffset(70,48))
+	local leave = button(gui,"하차",UDim2.new(1,-16,1,-180),UDim2.fromOffset(112,56))
+	leave.Name, leave.AnchorPoint = "ExitVehicle", Vector2.new(1,1)
+	leave.BackgroundColor3 = Color3.fromRGB(174,69,40)
+	local hint = Instance.new("TextLabel")
+	hint.Name, hint.AnchorPoint, hint.Size = "DrivingHint", Vector2.new(0.5,1), UDim2.new(0.85,0,0,40)
+	hint.Position = UDim2.new(0.5,0,1,if UIS.TouchEnabled then -124 else -20)
+	hint.BackgroundColor3, hint.BackgroundTransparency = Color3.fromRGB(17,25,44), 0.12
+	hint.TextColor3, hint.TextSize, hint.Font, hint.TextWrapped = Color3.fromRGB(246,244,235), 15, Enum.Font.GothamMedium, true
+	hint.Text = if UIS.TouchEnabled then "방향 버튼으로 운전 · 오른쪽 하차 버튼" else "WASD / 방향키 운전 · X 또는 Space로 하차"
+	hint.Parent = gui
+	leave.Visible, drive.Visible, hint.Visible = false, false, false
 	local reset = button(gui,"차량 복구",UDim2.new(1,-124,0,188),UDim2.fromOffset(112,44))
 	if settings then settings.register(reset)end
 	table.insert(connections,leave.Activated:Connect(function() send("ExitVehicle") end))
@@ -2601,21 +2643,31 @@ function Controller.start(remote: RemoteEvent,settings)
 		send("Sprint",{enabled=false}); send("VehicleInput",{throttle=0,steer=0})
 	end))
 	table.insert(connections,UIS.WindowFocused:Connect(function() focused = true end))
-	table.insert(connections,UIS.InputBegan:Connect(function(input, processed)
-		if not processed and input.KeyCode == Enum.KeyCode.Space then send("ExitVehicle") end
-	end))
+	local function ridingSeat()
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local seat = humanoid and humanoid.SeatPart
+		if humanoid and humanoid.Health > 0 and humanoid.Sit and seat and seat:IsA("VehicleSeat")
+			and seat.Parent and seat.Parent:GetAttribute("OwnerUserId") == player.UserId then return seat end
+		return nil
+	end
+	-- 기본 차량 점프 처리가 Space 입력을 먼저 소비해도 하차가 서버로 전달되게 한다.
+	Actions:BindActionAtPriority("MidnightExitVehicle",function(_,inputState)
+		if not ridingSeat() or UIS:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
+		if inputState == Enum.UserInputState.Begin then send("ExitVehicle") end
+		return Enum.ContextActionResult.Sink
+	end,false,Enum.ContextActionPriority.High.Value+1,Enum.KeyCode.X,Enum.KeyCode.Space,Enum.KeyCode.ButtonB)
 	local elapsed, sprintElapsed = 0, 0
 	table.insert(connections,RunService.RenderStepped:Connect(function(dt)
 		elapsed += dt; sprintElapsed += dt
 		if elapsed < 0.1 then return end
 		elapsed = 0
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		local seat = humanoid and humanoid.SeatPart
-		local riding = seat ~= nil and seat:IsA("VehicleSeat")
+		local seat = ridingSeat()
+		local riding = seat ~= nil
 		local down = state and state.downUntil > workspace:GetServerTimeNow()
 		drive.Visible = UIS.TouchEnabled and riding and not down
 		leave.Visible, sprint.Visible = riding and not down, not riding and not down
+		hint.Visible = riding and not down
 		reset.Visible = state ~= nil and state.vehicle.owned and (state.phase == "WAITING" or state.participant) and not down
 		if state then
 			local cooldown = math.max(0,math.ceil(state.vehicle.resetAt-workspace:GetServerTimeNow()))
@@ -2642,7 +2694,11 @@ function Controller.start(remote: RemoteEvent,settings)
 	end))
 	return {
 		update = function(snapshot: Types.Snapshot) state = snapshot end,
-		destroy = function() for _, connection in connections do connection:Disconnect() end; reset:Destroy(); gui:Destroy() end,
+		destroy = function()
+			Actions:UnbindAction("MidnightExitVehicle")
+			for _, connection in connections do connection:Disconnect() end
+			reset:Destroy(); gui:Destroy()
+		end,
 	}
 end
 return Controller
@@ -2854,6 +2910,7 @@ function Controller.start()
 			if stopped or player.Character ~= character then return end
 			local camera = workspace.CurrentCamera
 			if not camera then return end
+			if humanoid.SeatPart then return end
 			local forward = Vector3.new(0, 0, 1)
 			camera.CameraType, camera.CameraSubject = Enum.CameraType.Custom, humanoid
 			-- 새 캐릭터마다 한 번만 초기 방향을 잡고 즉시 Roblox 기본 카메라에 조작을 돌려준다.
@@ -2937,12 +2994,128 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
+          <Item class="ModuleScript" referent="52">
+            <Properties>
+              <string name="Name">VehicleController</string>
+              <string name="Source"><![CDATA[--!strict
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local Controller = {}
+
+function Controller.start()
+	local player = Players.LocalPlayer
+	local playerGui = player:WaitForChild("PlayerGui")
+	local entries = {}
+	local activeCamera, activeSeat, smoothed = nil, nil, nil
+	local binding = "MidnightVehicleCamera"
+	local elapsed = 1
+	local function releaseCamera()
+		if activeCamera then
+			local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if humanoid then activeCamera.CameraSubject = humanoid end
+			activeCamera.CameraType = Enum.CameraType.Custom
+		end
+		activeCamera, activeSeat, smoothed = nil, nil, nil
+	end
+	local function clear(model)
+		local entry = entries[model]
+		if not entry then return end
+		entry.tag:Destroy(); entry.highlight:Destroy()
+		if entry.prompt.Parent then entry.prompt.Enabled = entry.enabled end
+		entries[model] = nil
+	end
+	local function discover()
+		local world = workspace:FindFirstChild("GameWorld")
+		local vehicles = world and world:FindFirstChild("Vehicles")
+		for model in entries do if not vehicles or model.Parent ~= vehicles then clear(model) end end
+		if not vehicles then return end
+		for _, model in vehicles:GetChildren() do
+			if entries[model] then continue end
+			local seat = model:FindFirstChild("DriverSeat")
+			local prompt = seat and seat:FindFirstChildWhichIsA("ProximityPrompt",true)
+			if not seat or not seat:IsA("VehicleSeat") or not prompt then continue end
+			local tag = Instance.new("BillboardGui")
+			tag.Name, tag.Adornee, tag.Size = "ScooterOwner", seat, UDim2.fromOffset(220,58)
+			tag.StudsOffsetWorldSpace, tag.MaxDistance = Vector3.new(0,5,0), 150
+			tag.Parent = playerGui
+			local label = Instance.new("TextLabel")
+			label.Size, label.BackgroundColor3, label.BackgroundTransparency = UDim2.fromScale(1,1), Color3.fromRGB(17,25,44), 0.12
+			label.Font, label.TextSize, label.TextWrapped = Enum.Font.GothamBold, 16, true
+			label.Parent = tag
+			local corner = Instance.new("UICorner"); corner.Parent = label
+			local highlight = Instance.new("Highlight")
+			highlight.Name, highlight.Adornee = "MyScooter", model
+			highlight.FillColor, highlight.OutlineColor = Color3.fromRGB(99,216,184), Color3.fromRGB(170,255,230)
+			highlight.FillTransparency, highlight.OutlineTransparency = 0.8, 0
+			highlight.DepthMode, highlight.Parent = Enum.HighlightDepthMode.AlwaysOnTop, tag
+			entries[model] = {seat=seat,prompt=prompt,tag=tag,label=label,highlight=highlight,enabled=prompt.Enabled}
+		end
+	end
+	-- 소유 표시와 프롬프트는 이 클라이언트에서만 바꾼다. 탑승 권한은 서버가 별도로 검증한다.
+	local function mark()
+		for model, entry in entries do
+			local own = model:GetAttribute("OwnerUserId") == player.UserId
+			local owner = model:GetAttribute("OwnerName") or ""
+			-- Occupant는 NotReplicated 속성이므로 로컬 Humanoid의 탑승 좌석으로 표시를 판단한다.
+			entry.prompt.Enabled = own and activeSeat ~= entry.seat
+			entry.highlight.Enabled, entry.tag.AlwaysOnTop = own and activeSeat == nil, own
+			entry.tag.Enabled = activeSeat == nil
+			entry.label.TextColor3 = if own then Color3.fromRGB(170,255,230) else Color3.fromRGB(220,220,220)
+			entry.label.Text = if own then "내 스쿠터 · "..tostring(model:GetAttribute("VehicleId")).."번\n"..(if UIS.TouchEnabled then "다가가서 탑승 버튼" else "다가가서 E · 탑승")
+				elseif owner ~= "" then owner.."의 스쿠터\n다른 배달원 전용" else "배정 대기"
+		end
+	end
+	RunService:BindToRenderStep(binding,Enum.RenderPriority.Camera.Value+1,function(dt)
+		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		local seat = humanoid and humanoid.SeatPart
+		local model = seat and seat.Parent
+		local riding = humanoid and humanoid.Health > 0 and humanoid.Sit and seat and seat:IsA("VehicleSeat")
+			and model and model:GetAttribute("OwnerUserId") == player.UserId
+		local camera = workspace.CurrentCamera
+		if not riding or not camera then
+			if activeCamera then releaseCamera() end
+		else
+			if activeCamera ~= camera or activeSeat ~= seat then
+				releaseCamera()
+				activeCamera, activeSeat = camera, seat
+			end
+			-- 고정된 anchored 좌석에 Roblox 기본 차량 카메라가 재진입하지 않도록 뒤쪽 추적 시점을 직접 갱신한다.
+			local forward = seat.CFrame.LookVector
+			local focus = seat.Position + Vector3.new(0,3,0) + forward*3
+			local position = seat.Position - forward*16 + Vector3.new(0,8,0)
+			local desired = CFrame.lookAt(position,focus)
+			smoothed = if smoothed then smoothed:Lerp(desired,1-math.exp(-12*math.min(dt,0.1))) else desired
+			local params = RaycastParams.new()
+			params.FilterType, params.FilterDescendantsInstances, params.RespectCanCollide = Enum.RaycastFilterType.Exclude,{model,player.Character},true
+			local delta = smoothed.Position-focus
+			local hit = workspace:Raycast(focus,delta,params)
+			if hit then
+				position = focus + delta.Unit*math.max(0.1,hit.Distance-0.6)
+			else position = smoothed.Position end
+			camera.CameraType = Enum.CameraType.Scriptable
+			camera.CFrame, camera.Focus = CFrame.lookAt(position,focus), CFrame.new(focus)
+		end
+		elapsed += dt
+		if elapsed >= 0.2 then elapsed = 0; discover(); mark() end
+	end)
+	return {destroy=function()
+		RunService:UnbindFromRenderStep(binding)
+		releaseCamera()
+		local models={}; for model in entries do table.insert(models,model) end
+		for _, model in models do clear(model) end
+	end}
+end
+return Controller
+]]></string>
+            </Properties>
+          </Item>
         </Item>
-        <Item class="Folder" referent="52">
+        <Item class="Folder" referent="53">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="53">
+          <Item class="ModuleScript" referent="54">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--!strict
@@ -2954,7 +3127,7 @@ return table.freeze({
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="54">
+          <Item class="ModuleScript" referent="55">
             <Properties>
               <string name="Name">UIFactory</string>
               <string name="Source"><![CDATA[--!strict
@@ -3031,7 +3204,7 @@ return Factory
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="55">
+  <Item class="Workspace" referent="56">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

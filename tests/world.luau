@@ -73,6 +73,7 @@ for id = 1, 4 do
 	local actor = vehicleFactory.create(first.world.Vehicles, id, r.CFrame.new(id*12,3,-99))
 	assert(actor.seat.ClassName == "VehicleSeat" and actor.seat.Anchored and not actor.seat.CanTouch)
 	assert(actor.model.PrimaryPart == actor.seat and actor.prompt.MaxActivationDistance == 8)
+	assert(not actor.prompt.RequiresLineOfSight,"delivery box must not hide mount prompt")
 	assert(actor.model:GetAttribute("OwnerUserId") == 0)
 	for _, part in actor.model:GetDescendants() do if part:IsA("BasePart") then assert(part.Anchored) end end
 	table.insert(scooters,actor)

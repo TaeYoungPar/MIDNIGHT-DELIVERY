@@ -2,6 +2,7 @@
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local Actions = game:GetService("ContextActionService")
 local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
 local Controller = {}
 function Controller.start(remote: RemoteEvent,settings)
@@ -11,6 +12,7 @@ function Controller.start(remote: RemoteEvent,settings)
 	local connections, inputs, held = {}, {}, {}
 	local gui = Instance.new("ScreenGui")
 	gui.Name, gui.ResetOnSpawn, gui.ScreenInsets = "MidnightControls", false, Enum.ScreenInsets.CoreUISafeInsets
+	gui.DisplayOrder = 20
 	gui.Parent = player:WaitForChild("PlayerGui")
 	local drive = Instance.new("Frame")
 	drive.BackgroundTransparency, drive.Size, drive.AnchorPoint = 1, UDim2.fromOffset(164,104), Vector2.new(0.5,1)
@@ -42,7 +44,17 @@ function Controller.start(remote: RemoteEvent,settings)
 	holdButton(drive,"→", "Right",UDim2.fromOffset(112,54))
 	local sprint = holdButton(gui,"달리기","Sprint",UDim2.new(1,-82,1,-160))
 	sprint.Size = UDim2.fromOffset(70,48)
-	local leave = button(gui,"하차",UDim2.new(1,-82,1,-160),UDim2.fromOffset(70,48))
+	local leave = button(gui,"하차",UDim2.new(1,-16,1,-180),UDim2.fromOffset(112,56))
+	leave.Name, leave.AnchorPoint = "ExitVehicle", Vector2.new(1,1)
+	leave.BackgroundColor3 = Color3.fromRGB(174,69,40)
+	local hint = Instance.new("TextLabel")
+	hint.Name, hint.AnchorPoint, hint.Size = "DrivingHint", Vector2.new(0.5,1), UDim2.new(0.85,0,0,40)
+	hint.Position = UDim2.new(0.5,0,1,if UIS.TouchEnabled then -124 else -20)
+	hint.BackgroundColor3, hint.BackgroundTransparency = Color3.fromRGB(17,25,44), 0.12
+	hint.TextColor3, hint.TextSize, hint.Font, hint.TextWrapped = Color3.fromRGB(246,244,235), 15, Enum.Font.GothamMedium, true
+	hint.Text = if UIS.TouchEnabled then "방향 버튼으로 운전 · 오른쪽 하차 버튼" else "WASD / 방향키 운전 · X 또는 Space로 하차"
+	hint.Parent = gui
+	leave.Visible, drive.Visible, hint.Visible = false, false, false
 	local reset = button(gui,"차량 복구",UDim2.new(1,-124,0,188),UDim2.fromOffset(112,44))
 	if settings then settings.register(reset)end
 	table.insert(connections,leave.Activated:Connect(function() send("ExitVehicle") end))
@@ -56,21 +68,31 @@ function Controller.start(remote: RemoteEvent,settings)
 		send("Sprint",{enabled=false}); send("VehicleInput",{throttle=0,steer=0})
 	end))
 	table.insert(connections,UIS.WindowFocused:Connect(function() focused = true end))
-	table.insert(connections,UIS.InputBegan:Connect(function(input, processed)
-		if not processed and input.KeyCode == Enum.KeyCode.Space then send("ExitVehicle") end
-	end))
+	local function ridingSeat()
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local seat = humanoid and humanoid.SeatPart
+		if humanoid and humanoid.Health > 0 and humanoid.Sit and seat and seat:IsA("VehicleSeat")
+			and seat.Parent and seat.Parent:GetAttribute("OwnerUserId") == player.UserId then return seat end
+		return nil
+	end
+	-- 기본 차량 점프 처리가 Space 입력을 먼저 소비해도 하차가 서버로 전달되게 한다.
+	Actions:BindActionAtPriority("MidnightExitVehicle",function(_,inputState)
+		if not ridingSeat() or UIS:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
+		if inputState == Enum.UserInputState.Begin then send("ExitVehicle") end
+		return Enum.ContextActionResult.Sink
+	end,false,Enum.ContextActionPriority.High.Value+1,Enum.KeyCode.X,Enum.KeyCode.Space,Enum.KeyCode.ButtonB)
 	local elapsed, sprintElapsed = 0, 0
 	table.insert(connections,RunService.RenderStepped:Connect(function(dt)
 		elapsed += dt; sprintElapsed += dt
 		if elapsed < 0.1 then return end
 		elapsed = 0
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		local seat = humanoid and humanoid.SeatPart
-		local riding = seat ~= nil and seat:IsA("VehicleSeat")
+		local seat = ridingSeat()
+		local riding = seat ~= nil
 		local down = state and state.downUntil > workspace:GetServerTimeNow()
 		drive.Visible = UIS.TouchEnabled and riding and not down
 		leave.Visible, sprint.Visible = riding and not down, not riding and not down
+		hint.Visible = riding and not down
 		reset.Visible = state ~= nil and state.vehicle.owned and (state.phase == "WAITING" or state.participant) and not down
 		if state then
 			local cooldown = math.max(0,math.ceil(state.vehicle.resetAt-workspace:GetServerTimeNow()))
@@ -97,7 +119,11 @@ function Controller.start(remote: RemoteEvent,settings)
 	end))
 	return {
 		update = function(snapshot: Types.Snapshot) state = snapshot end,
-		destroy = function() for _, connection in connections do connection:Disconnect() end; reset:Destroy(); gui:Destroy() end,
+		destroy = function()
+			Actions:UnbindAction("MidnightExitVehicle")
+			for _, connection in connections do connection:Disconnect() end
+			reset:Destroy(); gui:Destroy()
+		end,
 	}
 end
 return Controller

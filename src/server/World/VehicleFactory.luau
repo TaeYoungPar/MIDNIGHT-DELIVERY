@@ -6,6 +6,7 @@ function Factory.create(parent: Instance, id: number, frame: CFrame)
 	model.Name = "Scooter" .. id
 	model:SetAttribute("VehicleId", id)
 	model:SetAttribute("OwnerUserId", 0)
+	model:SetAttribute("OwnerName", "")
 	local orange = Color3.fromRGB(255, 170, 69)
 	local navy = Color3.fromRGB(27, 39, 64)
 	local seat = Instance.new("VehicleSeat")
@@ -28,7 +29,8 @@ function Factory.create(parent: Instance, id: number, frame: CFrame)
 	attach.Position, attach.Parent = Vector3.new(0,1.5,-1), seat
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.ActionText, prompt.ObjectText, prompt.HoldDuration = "스쿠터 탑승", "배달 스쿠터 " .. id, 0.3
-	prompt.MaxActivationDistance, prompt.RequiresLineOfSight, prompt.Parent = 8, true, attach
+	-- 차체/배달 상자에 프롬프트 시야가 가려지지 않게 한다. 실제 거리·소유권은 서버에서 다시 검증한다.
+	prompt.MaxActivationDistance, prompt.RequiresLineOfSight, prompt.Parent = 8, false, attach
 	model.PrimaryPart, model.Parent = seat, parent
 	return { model = model, seat = seat, prompt = prompt }
 end

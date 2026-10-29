@@ -11,6 +11,7 @@ lune run tests/orders.luau
 lune run tests/recovery.luau
 lune run tests/monsters.luau
 lune run tests/vehicles.luau
+lune run tests/vehicle_client.luau
 lune run tests/profiles.luau
 lune run tests/data_service.luau
 lune run tests/audio.luau

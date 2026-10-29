@@ -17,6 +17,7 @@ function Controller.start()
 			if stopped or player.Character ~= character then return end
 			local camera = workspace.CurrentCamera
 			if not camera then return end
+			if humanoid.SeatPart then return end
 			local forward = Vector3.new(0, 0, 1)
 			camera.CameraType, camera.CameraSubject = Enum.CameraType.Custom, humanoid
 			-- 새 캐릭터마다 한 번만 초기 방향을 잡고 즉시 Roblox 기본 카메라에 조작을 돌려준다.

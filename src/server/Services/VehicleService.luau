@@ -8,7 +8,7 @@ local Service = {}
 Service.__index = Service
 type Actor = { model: Model, seat: VehicleSeat, prompt: ProximityPrompt }
 type Slot = { actor: Actor, owner: Player?, home: CFrame, frame: CFrame, yaw: number, speed: number,
-	throttle: number, steer: number, inputAt: number, riding: boolean }
+	throttle: number, steer: number, inputAt: number, riding: boolean, mountAfter: number }
 type States = { root: (any,Player) -> (BasePart?,Humanoid?), canAct: (any,Player) -> boolean }
 type Store = { slots: { Slot }, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> (),
 	connections: { RBXScriptConnection }, cooldowns: { [Player]: number }, stopped: boolean, elapsed: number }
@@ -20,12 +20,13 @@ function Service.new(parent: Instance, states: States, canUse: (Player) -> boole
 		local frame = CFrame.new((id - 2.5) * 12, Config.Map.Spawn.Y + 2, Config.Map.Spawn.Z + 20) * CFrame.Angles(0,math.pi,0)
 		local actor = Factory.create(parent, id, frame)
 		local slot: Slot = { actor = actor, owner = nil, home = frame, frame = frame, yaw = math.pi, speed = 0,
-			throttle = 0, steer = 0, inputAt = 0, riding = false }
+			throttle = 0, steer = 0, inputAt = 0, riding = false, mountAfter = 0 }
 		self.slots[id] = slot
 		table.insert(self.connections, actor.prompt.Triggered:Connect(function(player)
 			local root, humanoid = states:root(player)
 			if slot.owner ~= player or not self.canUse(player) or not states:canAct(player) or not root or not humanoid
-				or humanoid.SeatPart or (root.Position - actor.seat.Position).Magnitude > 8 then return end
+				or humanoid.SeatPart or workspace:GetServerTimeNow() < slot.mountAfter
+				or (root.Position - actor.seat.Position).Magnitude > 8 then return end
 			actor.seat:Sit(humanoid)
 		end))
 		table.insert(self.connections, actor.seat:GetPropertyChangedSignal("Occupant"):Connect(function()
@@ -62,21 +63,53 @@ function Service.add(self: Runtime, player: Player)
 		if not slot.owner then
 			slot.owner = player
 			slot.actor.model:SetAttribute("OwnerUserId", player.UserId)
+			slot.actor.model:SetAttribute("OwnerName", player.DisplayName)
 			slot.actor.prompt.ObjectText = player.DisplayName .. "의 스쿠터"
 			self:skin(player,"")
 			return
 		end
 	end
 end
-function Service.exit(self: Runtime, player: Player)
+-- 벽/바닥을 검사해 좌우·뒤·앞 순서로 하차 지점을 찾는다. 막혔으면 본부의 안전한 스폰으로 복귀한다.
+function Service.exitFrame(self: Runtime, slot: Slot, player: Player, parkAtHome: boolean?): CFrame
+	local base = if parkAtHome then slot.home else slot.frame
+	local params, overlap = RaycastParams.new(), OverlapParams.new()
+	params.FilterType, params.FilterDescendantsInstances, params.RespectCanCollide = Enum.RaycastFilterType.Exclude, {slot.actor.model, player.Character}, true
+	overlap.FilterType, overlap.FilterDescendantsInstances, overlap.RespectCanCollide = Enum.RaycastFilterType.Exclude, {slot.actor.model, player.Character}, true
+	for _, offset in {Vector3.new(6,0,0),Vector3.new(-6,0,0),Vector3.new(0,0,8),Vector3.new(0,0,-8)} do
+		local point = base:PointToWorldSpace(offset)
+		local ground = workspace:Raycast(point + Vector3.new(0,8,0), Vector3.new(0,-30,0), params)
+		if not ground or ground.Normal.Y < 0.65 or ground.Position.Y > base.Position.Y + 2 then continue end
+		local position = ground.Position + Vector3.new(0,3.2,0)
+		local origin = base.Position + Vector3.new(0,2,0)
+		if workspace:Raycast(origin, position-origin, params) then continue end
+		local frame = CFrame.new(position) * base.Rotation
+		if #workspace:GetPartBoundsInBox(frame,Vector3.new(4,5.5,4),overlap) == 0 then return frame end
+	end
+	return CFrame.new(Config.Map.Spawn + Vector3.new(0,4,0)) * CFrame.Angles(0,math.pi,0)
+end
+function Service.exit(self: Runtime, player: Player, parkAtHome: boolean?)
 	local slot = self:slot(player)
 	if not slot then return end
-	local occupant = slot.actor.seat.Occupant
 	local character = player.Character
-	if occupant and character and occupant.Parent == character then
-		occupant.Sit = false
-		local weld = slot.actor.seat:FindFirstChild("SeatWeld")
-		if weld and weld:IsA("Weld") and ((weld.Part1 and weld.Part1:IsDescendantOf(character)) or (weld.Part0 and weld.Part0:IsDescendantOf(character))) then weld:Destroy() end
+	local root, humanoid = self.states:root(player)
+	local seat = slot.actor.seat
+	local attached = humanoid ~= nil and humanoid.Sit and (seat.Occupant == humanoid or humanoid.SeatPart == seat)
+	-- Occupant는 Sit=false보다 늦게 복제될 수 있다. 소유 캐릭터의 용접을 먼저 찾아 제거한다.
+	for _, weld in seat:GetChildren() do
+		if weld.Name == "SeatWeld" and weld:IsA("Weld") and character
+			and ((weld.Part1 and weld.Part1:IsDescendantOf(character)) or (weld.Part0 and weld.Part0:IsDescendantOf(character))) then
+			attached = true
+			weld:Destroy()
+		end
+	end
+	if attached and character and root and humanoid then
+		slot.mountAfter = workspace:GetServerTimeNow() + 1
+		humanoid.Sit, humanoid.Jump = false, false
+		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		character:PivotTo(self:exitFrame(slot,player,parkAtHome))
+		root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
+		self.authorizedMove(player)
 	end
 	slot.speed, slot.throttle, slot.steer, slot.riding = 0, 0, 0, false
 end
@@ -86,18 +119,10 @@ function Service.reset(self: Runtime, player: Player, manual: boolean): boolean
 	local timestamp = workspace:GetServerTimeNow()
 	if manual and (not self.canUse(player) or not self.states:canAct(player) or timestamp < (self.cooldowns[player] or 0)) then return false end
 	if manual then self.cooldowns[player] = timestamp + Config.Vehicle.ResetCooldown end
-	local wasRiding = slot.riding
-	self:exit(player)
-	-- 소유자의 SeatWeld를 제거한 뒤 복구한다. 서버 내 지연 작업은 소유권/종료 상태를 재검사한다.
-	task.defer(function()
-		if self.stopped or slot.owner ~= player then return end
-		slot.frame, slot.yaw = slot.home, math.pi
-		slot.actor.model:PivotTo(slot.frame)
-		if wasRiding and player.Character then
-			player.Character:PivotTo(slot.home * CFrame.new(5,2,0))
-			self.authorizedMove(player)
-		end
-	end)
+	self:exit(player,true)
+	-- 용접 제거와 안전 하차를 완료한 뒤 같은 호출에서 복구하여 지연된 재배치가 새 탑승을 덮지 않게 한다.
+	slot.frame, slot.yaw = slot.home, math.pi
+	slot.actor.model:PivotTo(slot.frame)
 	self.changed()
 	return true
 end
@@ -107,6 +132,7 @@ function Service.remove(self: Runtime, player: Player)
 		self:exit(player)
 		slot.owner = nil
 		slot.actor.model:SetAttribute("OwnerUserId", 0)
+		slot.actor.model:SetAttribute("OwnerName", "")
 		slot.actor.model:PivotTo(slot.home)
 		slot.frame, slot.yaw = slot.home, math.pi
 	end
