@@ -75,7 +75,14 @@ for id = 1, 4 do
 	assert(actor.model.PrimaryPart == actor.seat and actor.prompt.MaxActivationDistance == 8)
 	assert(not actor.prompt.RequiresLineOfSight,"delivery box must not hide mount prompt")
 	assert(actor.model:GetAttribute("OwnerUserId") == 0)
-	for _, part in actor.model:GetDescendants() do if part:IsA("BasePart") then assert(part.Anchored) end end
+	assert(not actor.seat.CanCollide)
+	for _, part in actor.model:GetDescendants() do
+		if not part:IsA("BasePart") or part==actor.seat then continue end
+		assert(not part.Anchored and part.Massless and not part.CanTouch)
+		assert(part.CanCollide==(part.Name=="Body"))
+		local weld=part:FindFirstChild("ChassisWeld")
+		assert(weld and weld.Part0==actor.seat and weld.Part1==part,"one welded chassis, no independently anchored decorations")
+	end
 	table.insert(scooters,actor)
 end
 assert(#first.world.Vehicles:GetChildren() == 4)

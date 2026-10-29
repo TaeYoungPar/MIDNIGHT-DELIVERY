@@ -7,20 +7,21 @@ local Factory = require(script.Parent.Parent.World.VehicleFactory)
 local Service = {}
 Service.__index = Service
 type Actor = { model: Model, seat: VehicleSeat, prompt: ProximityPrompt }
+type Rider = { humanoid: Humanoid, autoRotate: boolean, folder: Folder, connection: RBXScriptConnection }
 type Slot = { actor: Actor, owner: Player?, home: CFrame, frame: CFrame, yaw: number, speed: number,
-	throttle: number, steer: number, inputAt: number, riding: boolean, mountAfter: number }
+	throttle: number, steer: number, inputAt: number, riding: boolean, mountAfter: number, rider: Rider? }
 type States = { root: (any,Player) -> (BasePart?,Humanoid?), canAct: (any,Player) -> boolean }
 type Store = { slots: { Slot }, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> (),
-	connections: { RBXScriptConnection }, cooldowns: { [Player]: number }, stopped: boolean, elapsed: number }
+	connections: { RBXScriptConnection }, cooldowns: { [Player]: number }, stopped: boolean }
 export type Runtime = typeof(setmetatable({} :: Store, Service))
 function Service.new(parent: Instance, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> ()): Runtime
 	local self: Runtime = setmetatable({ slots = {}, states = states, canUse = canUse, changed = changed,
-		authorizedMove = authorizedMove, connections = {}, cooldowns = {}, stopped = false, elapsed = 0 }, Service)
+		authorizedMove = authorizedMove, connections = {}, cooldowns = {}, stopped = false }, Service)
 	for id = 1, 4 do
 		local frame = CFrame.new((id - 2.5) * 12, Config.Map.Spawn.Y + 2, Config.Map.Spawn.Z + 20) * CFrame.Angles(0,math.pi,0)
 		local actor = Factory.create(parent, id, frame)
 		local slot: Slot = { actor = actor, owner = nil, home = frame, frame = frame, yaw = math.pi, speed = 0,
-			throttle = 0, steer = 0, inputAt = 0, riding = false, mountAfter = 0 }
+			throttle = 0, steer = 0, inputAt = 0, riding = false, mountAfter = 0, rider = nil }
 		self.slots[id] = slot
 		table.insert(self.connections, actor.prompt.Triggered:Connect(function(player)
 			local root, humanoid = states:root(player)
@@ -30,6 +31,7 @@ function Service.new(parent: Instance, states: States, canUse: (Player) -> boole
 			actor.seat:Sit(humanoid)
 		end))
 		table.insert(self.connections, actor.seat:GetPropertyChangedSignal("Occupant"):Connect(function()
+			self:clearRider(slot)
 			local humanoid = actor.seat.Occupant
 			if humanoid then
 				local character = humanoid.Parent
@@ -38,20 +40,42 @@ function Service.new(parent: Instance, states: States, canUse: (Player) -> boole
 					humanoid.Sit = false
 					return
 				end
+				self:bindRider(slot, humanoid)
 			end
 			slot.riding = humanoid ~= nil
 			slot.throttle, slot.steer, slot.speed = 0, 0, 0
 			self.changed()
 		end))
 	end
-	table.insert(self.connections, RunService.Heartbeat:Connect(function(dt)
-		self.elapsed += dt
-		if self.elapsed < 1/30 then return end
-		local step = math.min(self.elapsed,0.05)
-		self.elapsed = 0
-		self:tick(step)
+	-- 좌석 용접을 물리 계산 전에 이동한다. 프레임을 버리는 30Hz 게이트로 인한 불규칙한 계단 이동을 제거한다.
+	table.insert(self.connections, RunService.PreSimulation:Connect(function(dt)
+		self:tick(math.min(dt,0.05))
 	end))
 	return self
+end
+function Service.clearRider(self: Runtime, slot: Slot)
+	local rider = slot.rider
+	if not rider then return end
+	rider.connection:Disconnect()
+	rider.folder:Destroy()
+	if rider.humanoid.Parent then rider.humanoid.AutoRotate = rider.autoRotate end
+	slot.rider = nil
+end
+-- 캐릭터의 기본 충돌 설정을 덮어쓰지 않고 자기 차체와의 접촉만 차단한다. 탑승 중 추가된 액세서리도 포함한다.
+function Service.bindRider(self: Runtime, slot: Slot, humanoid: Humanoid)
+	local character, body = humanoid.Parent, slot.actor.model:FindFirstChild("Body")
+	if not character or not body or not body:IsA("BasePart") then return end
+	local folder = Instance.new("Folder")
+	folder.Name, folder.Parent = "RiderCollision", slot.actor.seat
+	local function exclude(part: Instance)
+		if not part:IsA("BasePart") then return end
+		local constraint = Instance.new("NoCollisionConstraint")
+		constraint.Part0, constraint.Part1, constraint.Parent = body, part, folder
+	end
+	for _, part in character:GetDescendants() do exclude(part) end
+	slot.rider = { humanoid = humanoid, autoRotate = humanoid.AutoRotate, folder = folder,
+		connection = character.DescendantAdded:Connect(exclude) }
+	humanoid.AutoRotate = false
 end
 function Service.slot(self: Runtime, player: Player): Slot?
 	for _, slot in self.slots do if slot.owner == player then return slot end end
@@ -94,6 +118,7 @@ function Service.exit(self: Runtime, player: Player, parkAtHome: boolean?)
 	local character = player.Character
 	local root, humanoid = self.states:root(player)
 	local seat = slot.actor.seat
+	self:clearRider(slot)
 	local attached = humanoid ~= nil and humanoid.Sit and (seat.Occupant == humanoid or humanoid.SeatPart == seat)
 	-- Occupant는 Sit=false보다 늦게 복제될 수 있다. 소유 캐릭터의 용접을 먼저 찾아 제거한다.
 	for _, weld in seat:GetChildren() do
@@ -191,11 +216,20 @@ function Service.tick(self: Runtime, dt: number)
 		local hit = workspace:Blockcast(frame * CFrame.new(0,0.6,0), Vector3.new(4.5,4.4,7.8), delta, params)
 		if hit then slot.speed = 0; continue end
 		local proposed = frame.Position + delta
-		local ground = workspace:Raycast(proposed + Vector3.new(0,8,0), Vector3.new(0,-35,0), params)
+		-- 다른 차량/탑승자 위로 지면 높이가 튀지 않도록 바닥 광선에서는 모든 차량과 캐릭터를 제외한다.
+		local groundParams = RaycastParams.new()
+		local excluded: { Instance } = { slot.actor.model.Parent :: Instance }
+		for _, other in Players:GetPlayers() do if other.Character then table.insert(excluded,other.Character) end end
+		groundParams.FilterType, groundParams.FilterDescendantsInstances, groundParams.RespectCanCollide = Enum.RaycastFilterType.Exclude, excluded, true
+		local ground = workspace:Raycast(proposed + Vector3.new(0,8,0), Vector3.new(0,-35,0), groundParams)
 		if not ground or math.abs(proposed.X) > 310 or math.abs(proposed.Z) > 310 or ground.Position.Y < -10 then
 			self:reset(player, false); continue
 		end
-		slot.yaw, slot.frame = yaw, CFrame.new(proposed.X, ground.Position.Y + 3, proposed.Z) * CFrame.Angles(0,yaw,0)
+		local targetY = ground.Position.Y + Config.Vehicle.RideHeight
+		if ground.Normal.Y < 0.65 or targetY - slot.frame.Position.Y > Config.Vehicle.MaxStepHeight then slot.speed = 0; continue end
+		-- 도로/차선의 얇은 높이 차이를 즉시 복사하지 않아 좌석과 카메라가 위아래로 튀지 않게 한다.
+		local height = slot.frame.Position.Y + (targetY-slot.frame.Position.Y)*(1-math.exp(-Config.Vehicle.GroundResponse*dt))
+		slot.yaw, slot.frame = yaw, CFrame.new(proposed.X, height, proposed.Z) * CFrame.Angles(0,yaw,0)
 		slot.actor.model:PivotTo(slot.frame)
 	end
 end

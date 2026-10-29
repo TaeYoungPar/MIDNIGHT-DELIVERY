@@ -90,8 +90,18 @@ f.seat.Position+=r.Vector3.new(2,0,0);f.seat.CFrame=r.CFrame.new(f.seat.Position
 f.step(1/60)
 assert(f.camera.CFrame.Position.X>previous.X and f.camera.CFrame.Position.X<previous.X+2,"replicated motion must be smoothed")
 f.hit(5);f.step(1/60)
-local focus=f.seat.Position+r.Vector3.new(0,3,0)+f.seat.CFrame.LookVector*3
-assert(math.abs((f.camera.CFrame.Position-focus).Magnitude-4.4)<0.01,"wall hit must shorten camera arm")
+assert(math.abs((f.camera.CFrame.Position-f.camera.Focus.Position).Magnitude-4.4)<0.01,"wall hit must shorten camera arm from the smoothed focus")
+f.hit(nil)
+local oldFocus=f.camera.Focus.Position
+f.seat.Position+=r.Vector3.new(0,0.25,0)
+f.seat.CFrame=r.CFrame.new(f.seat.Position)*r.CFrame.Angles(0,math.pi-0.1,0)
+f.step(1/60)
+assert((f.camera.Focus.Position-oldFocus).Magnitude<0.25,"focus must not snap to a replicated height or steering update")
+local arm=(f.camera.CFrame.Position-f.camera.Focus.Position).Magnitude
+assert(arm>4.4 and arm<10,"leaving an obstruction must extend the arm gradually instead of zooming out at once")
+f.seat.Position+=r.Vector3.new(100,0,0);f.seat.CFrame=r.CFrame.new(f.seat.Position)
+f.step(1/60)
+assert((f.camera.Focus.Position-(f.seat.Position+r.Vector3.new(0,3,-3))).Magnitude<0.01,"reset must discard the old camera frame")
 local action=f.actions.MidnightExitVehicle
 assert(action.priority>r.Enum.ContextActionPriority.High.Value)
 assert(table.find(action.keys,r.Enum.KeyCode.Space)and table.find(action.keys,r.Enum.KeyCode.X))

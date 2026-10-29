@@ -9,6 +9,7 @@ function Controller.start()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local entries = {}
 	local activeCamera, activeSeat, smoothed = nil, nil, nil
+	local armLength = nil
 	local binding = "MidnightVehicleCamera"
 	local elapsed = 1
 	local function releaseCamera()
@@ -18,6 +19,7 @@ function Controller.start()
 			activeCamera.CameraType = Enum.CameraType.Custom
 		end
 		activeCamera, activeSeat, smoothed = nil, nil, nil
+		armLength = nil
 	end
 	local function clear(model)
 		local entry = entries[model]
@@ -82,18 +84,24 @@ function Controller.start()
 				activeCamera, activeSeat = camera, seat
 			end
 			-- 고정된 anchored 좌석에 Roblox 기본 차량 카메라가 재진입하지 않도록 뒤쪽 추적 시점을 직접 갱신한다.
-			local forward = seat.CFrame.LookVector
-			local focus = seat.Position + Vector3.new(0,3,0) + forward*3
-			local position = seat.Position - forward*16 + Vector3.new(0,8,0)
-			local desired = CFrame.lookAt(position,focus)
-			smoothed = if smoothed then smoothed:Lerp(desired,1-math.exp(-12*math.min(dt,0.1))) else desired
+			-- 카메라 위치와 주시점이 서로 다른 시간의 좌석을 보지 않도록 차량 프레임 하나를 보간한다.
+			-- 복구/큰 위치 보정은 즉시 따라가서 오래된 위치에서 지형을 가로질러 이동하지 않게 한다.
+			local desired = seat.CFrame
+			if smoothed and (smoothed.Position-desired.Position).Magnitude >= 24 then armLength = nil end
+			smoothed = if smoothed and (smoothed.Position-desired.Position).Magnitude < 24
+				then smoothed:Lerp(desired,1-math.exp(-12*math.min(dt,0.1))) else desired
+			local forward = smoothed.LookVector
+			local focus = smoothed.Position + Vector3.new(0,3,0) + forward*3
+			local position = smoothed.Position - forward*16 + Vector3.new(0,8,0)
 			local params = RaycastParams.new()
 			params.FilterType, params.FilterDescendantsInstances, params.RespectCanCollide = Enum.RaycastFilterType.Exclude,{model,player.Character},true
-			local delta = smoothed.Position-focus
+			local delta = position-focus
 			local hit = workspace:Raycast(focus,delta,params)
-			if hit then
-				position = focus + delta.Unit*math.max(0.1,hit.Distance-0.6)
-			else position = smoothed.Position end
+			local available = if hit then math.min(delta.Magnitude,math.max(0.1,hit.Distance-0.6)) else delta.Magnitude
+			-- 벽 쪽으로는 즉시 줄이되, 벽을 벗어날 때는 천천히 늘려 줌이 번갈아 튀지 않게 한다.
+			armLength = if not armLength or available < armLength then available
+				else armLength+(available-armLength)*(1-math.exp(-8*math.min(dt,0.1)))
+			position = focus + delta.Unit*armLength
 			camera.CameraType = Enum.CameraType.Scriptable
 			camera.CFrame, camera.Focus = CFrame.lookAt(position,focus), CFrame.new(focus)
 		end

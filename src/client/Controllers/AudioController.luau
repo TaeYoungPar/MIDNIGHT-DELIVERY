@@ -11,6 +11,7 @@ function Controller.start(settings)
 	group.Name, group.Volume, group.Parent = "MidnightAudio", 1, SoundService
 	local sounds, connections = {}, {}
 	local routed = setmetatable({}, {__mode = "k"})
+	local silencedSteps = {}
 	local stopped, muted = false, false
 	local previous: Types.Snapshot? = nil
 	for name, definition in Catalog do
@@ -61,18 +62,41 @@ function Controller.start(settings)
 			sounds.Wind:Play()
 		end
 	end)
+	local function restoreSteps()
+		for sound, volume in silencedSteps do
+			if sound.Parent then sound.Volume = volume end
+		end
+		table.clear(silencedSteps)
+	end
 	local elapsed, dangerAt = 0, 0
 	table.insert(connections,RunService.RenderStepped:Connect(function(dt)
-		elapsed += dt; if elapsed < 0.1 then return end; elapsed = 0
 		local p = Players.LocalPlayer
 		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
 		local seat = humanoid and humanoid.SeatPart
 		local model = seat and seat.Parent
-		local speed = if model then model:GetAttribute("Speed") or 0 else 0
-		if speed > 1 then
-			sounds.Motor.PlaybackSpeed = 0.65 + speed/38*0.9
+		local riding = humanoid and humanoid.Health > 0 and humanoid.Sit and seat and seat:IsA("VehicleSeat")
+			and model and model:GetAttribute("VehicleId") ~= nil and model:GetAttribute("OwnerUserId") == p.UserId
+		if riding then
+			local speed = model:GetAttribute("Speed") or 0
+			local ratio = math.clamp(speed/38,0,1)
+			-- 정차 때도 낮은 공회전을 유지하고 복제되는 속도 값 사이를 부드럽게 연결한다.
+			local alpha = 1-math.exp(-8*math.min(dt,0.1))
+			sounds.Motor.PlaybackSpeed += (Catalog.Motor.pitch+ratio*1.05-sounds.Motor.PlaybackSpeed)*alpha
+			sounds.Motor.Volume += (0.07+ratio*(Catalog.Motor.volume-0.07)-sounds.Motor.Volume)*alpha
 			if not sounds.Motor.Playing then sounds.Motor:Play() end
-		elseif sounds.Motor.Playing then sounds.Motor:Stop() end
+			-- 좌석 이동을 걷기로 오인해 재생되는 기본 Running 소리도 탑승 중에만 억제한다.
+			for _, instance in p.Character:GetDescendants() do
+				if instance:IsA("Sound") and instance.Name == "Running" then
+					if silencedSteps[instance] == nil then silencedSteps[instance] = instance.Volume end
+					instance.Volume = 0
+				end
+			end
+		else
+			if sounds.Motor.Playing then sounds.Motor:Stop() end
+			sounds.Motor.PlaybackSpeed, sounds.Motor.Volume = Catalog.Motor.pitch, 0.07
+			restoreSteps()
+		end
+		elapsed += dt; if elapsed < 0.1 then return end; elapsed = 0
 		if previous and previous.chase.endsAt > workspace:GetServerTimeNow() and os.clock() > dangerAt then
 			play("Danger"); dangerAt = os.clock()+1.2
 		end
@@ -90,6 +114,7 @@ function Controller.start(settings)
 		destroy = function()
 			stopped = true
 			for _, connection in connections do connection:Disconnect() end
+			restoreSteps()
 			for sound in routed do if sound.Parent and sound.SoundGroup == group then sound.SoundGroup = nil end end
 			for _, sound in sounds do sound:Destroy() end
 			if disconnectSettings then disconnectSettings()end

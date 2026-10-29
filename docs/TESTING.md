@@ -1,6 +1,18 @@
 # 검증 기록과 Studio 절차
 
-현재 빌드는 P6 스쿠터 수정판입니다. 최신 검사 기록은 맨 아래 스쿠터 수정 절입니다. 사용자 수동 확인은 별도 **[USER_VERIFICATION.md](USER_VERIFICATION.md)**에 모았습니다. 앞부분은 이전 단계 당시 기록입니다.
+## 최신 — 스쿠터 떨림·엔진음 수정
+
+- `bash tools/verify.sh`: Luau 전체 컴파일, 엔진 비의존 모델 타입, 번호 있는 로직/대역 **76개**, 별도 컨트롤러/통합/월드 검사, Rojo 빌드와 **44개 소스** 포함·일치 PASS.
+- `tests/vehicles.luau`: 기존 12개 + 매 물리 프레임 이동/도로 높이 완충·차량과 플레이어의 지면 제외/자기 차체 충돌·자동 회전 복원 검사로 **15개 PASS**. 자연 하차, 추가된 캐릭터 부품, 활성 탑승 중 서비스 종료 정리도 검사합니다. 실제 물리는 대역입니다.
+- `tests/vehicle_client.luau`: 주시점 높이·회전 보간, 벽에서 빠져나올 때 줌 완충, 큰 위치 복구의 보간 초기화 추가 PASS. 실제 픽셀과 카메라 체감은 미검증입니다. Lune의 CFrame 구현은 Roblox 렌더러를 대신하지 않습니다.
+- `tests/world.luau`: 좌석 하나만 고정, 차체 부품 용접/massless, Body만 충돌하는 구조 확인 PASS.
+- `tests/audio.luau`: 발소리 대신 출처 확인한 엔진 ID 사용, 정차 공회전, RPM 완충, 루프 재시작 방지, 탑승 중 기본 발소리 억제/새 Running 소리/하차 복원 검사 PASS. **실제 음원 다운로드·청취 검사가 아닙니다**.
+- 현재 공개 API 덤프에서 PreSimulation, WeldConstraint/NoCollisionConstraint의 Part0/Part1, Humanoid.AutoRotate, Sound.PlaybackSpeed/Volume/SoundId 존재 확인. PreSimulation/WeldConstraint 공식 Creator Hub 원문 대조. API 실제 호출 실행 성공을 뜻하지 않습니다.
+- Studio 수동 검사: `USER_VERIFICATION.md` 맨 앞 떨림·엔진음 점검. 2·4인/모바일/R6·R15/고지연/실제 엔진음 접근은 **NOT TESTED**. 사용자의 실패 보고를 자동 검사로 통과 처리하지 않습니다.
+
+아래는 이전 빌드의 검사 기록입니다.
+
+현재 빌드는 P6 스쿠터 수정판입니다. 최신 검사 기록은 맨 위 떨림·엔진음 수정 절입니다. 사용자 수동 확인은 별도 **[USER_VERIFICATION.md](USER_VERIFICATION.md)**에 모았습니다. 아래는 이전 단계 당시 기록입니다.
 
 2026-10-28. 자동 검사 결과와 엔진 실행 결과를 구분합니다.
 

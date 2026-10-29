@@ -16,7 +16,7 @@ local function make(class)
 end
 local clock=0
 local characterSound=make("Sound");characterSound.Parent=true
-local player={Character=nil,WaitForChild=function()return{}end}
+local player={UserId=1,Character=nil,WaitForChild=function()return{}end}
 local module=luau.load(fs.readFile("src/client/Controllers/AudioController.luau"),{environment={
 	game={GetService=function(_,name)
 		if name=="SoundService"then return{}elseif name=="Players"then return{LocalPlayer=player}
@@ -30,7 +30,11 @@ local module=luau.load(fs.readFile("src/client/Controllers/AudioController.luau"
 local audio=module.start()
 local byName={};for _,s in sounds do if s.Name then byName[s.Name]=s end end
 assert(characterSound.SoundGroup==groups[1] and byName.Wind.Playing)
-for _,definition in catalog do assert(definition.id:find("rbxasset://sounds/",1,true)==1 and definition.volume<=0.4)end
+for name,definition in catalog do
+	assert(definition.volume<=0.4)
+	if name=="Motor"then assert(definition.id=="rbxassetid://6002661882","engine must use the sourced engine loop, never a footsteps sample")
+	else assert(definition.id:find("rbxasset://sounds/",1,true)==1)end
+end
 local function snap(phase,coins,down,index,chase)
 	return{phase=phase,coins=coins,downUntil=down,orderIndex=index,chase={endsAt=chase}}
 end
@@ -42,11 +46,27 @@ audio.update(snap("PLAYING",80,0,2,0));assert(byName.Recover.plays==1)
 audio.update(snap("PLAYING",80,0,2,10));heartbeat:Fire(0.1);assert(byName.Danger.plays==1)
 buttons[1].Activated:Fire();assert(groups[1].Volume==0 and buttons[1].Text=="소리 꺼짐")
 buttons[1].Activated:Fire();assert(groups[1].Volume==1)
-player.Character={FindFirstChildOfClass=function()return{SeatPart={Parent={GetAttribute=function()return 30 end}}}end}
-heartbeat:Fire(0.1);assert(byName.Motor.Playing and byName.Motor.PlaybackSpeed>0.65)
-player.Character=nil;heartbeat:Fire(0.1);assert(not byName.Motor.Playing)
+local speed=0
+local model={GetAttribute=function(_,key)return if key=="Speed"then speed elseif key=="VehicleId"then 1 else 1 end}
+local seat={Parent=model,IsA=function(_,name)return name=="VehicleSeat"end}
+local humanoid={SeatPart=seat,Sit=true,Health=100}
+local running=make("Sound");running.Name,running.Volume,running.Parent="Running",0.65,true
+local steps={running}
+player.Character={FindFirstChildOfClass=function()return humanoid end,GetDescendants=function()return steps end}
+heartbeat:Fire(0.1)
+assert(byName.Motor.Playing and running.Volume==0,"idling engine must play without footsteps")
+local initialPitch,plays=byName.Motor.PlaybackSpeed,byName.Motor.plays
+speed=38;heartbeat:Fire(1/60)
+assert(byName.Motor.PlaybackSpeed>initialPitch and byName.Motor.PlaybackSpeed<catalog.Motor.pitch+1.05,"RPM must ease, not jump")
+assert(byName.Motor.plays==plays,"do not restart the loop at every speed update")
+local late=make("Sound");late.Name,late.Volume,late.Parent="Running",0.5,true;table.insert(steps,late)
+heartbeat:Fire(0.1);assert(late.Volume==0)
+humanoid.SeatPart=nil;humanoid.Sit=false;heartbeat:Fire(0.1)
+assert(not byName.Motor.Playing and running.Volume==0.65 and late.Volume==0.5,"dismount must restore walking audio")
+humanoid.SeatPart=seat;humanoid.Sit=true;heartbeat:Fire(0.1);assert(byName.Motor.Playing)
+player.Character=nil;heartbeat:Fire(0.1);assert(not byName.Motor.Playing and running.Volume==0.65)
 audio.destroy();assert(characterSound.SoundGroup==nil and groups[1].destroyed)
-for _,sound in sounds do if sound~=characterSound then assert(sound.destroyed)end end
+for _,sound in sounds do if sound~=characterSound and sound~=running and sound~=late then assert(sound.destroyed)end end
 local options={muted=true,loaded=false}
 local subscribed=nil
 local bridge={

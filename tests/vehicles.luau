@@ -10,15 +10,18 @@ local function signal()
 		Fire=function(_,...)for _,fn in handlers do fn(...)end end}
 end
 local function setup()
-	local clock, wall, overlap, ground = 0,false,false,true
+	local clock, wall, overlap, ground, groundY = 0,false,false,true,0
+	local groundFilters = nil
+	local created = {}
 	local boxBlocked = function() return false end
 	local deferred, players, actors = {},{},{}
 	local heartbeat=signal()
 	local function player(id)
 		local p={UserId=id,DisplayName="Tester"..id, allowed=true, down=false}
-		p.root={Position=r.Vector3.new(0,5,-99)}
-		p.humanoid={Sit=false,ChangeState=function(self,state)self.state=state end}
-		p.Character={IsA=function()return true end,PivotTo=function(_,cf)p.root.Position=cf.Position end}
+		p.root={Position=r.Vector3.new(0,5,-99),IsA=function(_,class)return class=="BasePart"end}
+		p.humanoid={Sit=false,AutoRotate=true,ChangeState=function(self,state)self.state=state end}
+		p.Character={IsA=function()return true end,PivotTo=function(_,cf)p.root.Position=cf.Position end,
+			GetDescendants=function()return{p.root}end,DescendantAdded=signal()}
 		p.root.IsDescendantOf=function(_,char)return char==p.Character end
 		p.humanoid.Parent=p.Character
 		table.insert(players,p);return p
@@ -29,9 +32,10 @@ local function setup()
 		local attrs={}
 		local changed=signal()
 		local actor={}
-		actor.model={FindFirstChild=function()return nil end,SetAttribute=function(_,k,v)attrs[k]=v end,GetAttribute=function(_,k)return attrs[k]end, Destroy=function(self)self.destroyed=true end}
+		local body={IsA=function(_,class)return class=="BasePart"end}
+		actor.model={Parent=parent,FindFirstChild=function(_,name)return if name=="Body"then body else nil end,SetAttribute=function(_,k,v)attrs[k]=v end,GetAttribute=function(_,k)return attrs[k]end, Destroy=function(self)self.destroyed=true end}
 		local welds={}
-		actor.seat={Position=frame.Position,GetPropertyChangedSignal=function()return changed end,GetChildren=function()
+		actor.seat={Position=frame.Position,occupantChanged=changed,GetPropertyChangedSignal=function()return changed end,GetChildren=function()
 			local live={};for _,w in welds do if not w.destroyed then table.insert(live,w)end end;return live end}
 		actor.seat.Sit=function(self,h)
 			self.Occupant=h;h.SeatPart=self;h.Sit=true
@@ -49,16 +53,18 @@ local function setup()
 	local playerService={GetPlayers=function()return players end,GetPlayerFromCharacter=function(_,char)for _,p in players do if p.Character==char then return p end end;return nil end}
 	local config=luau.load(fs.readFile("src/shared/Config.luau"),{environment={Vector3=r.Vector3}})()
 	local module=luau.load(fs.readFile("src/server/Services/VehicleService.luau"),{environment={
-		game={GetService=function(_,name)if name=="Players"then return playerService elseif name=="RunService"then return{Heartbeat=heartbeat}else return{Shared={Config="config"}}end end},
+		game={GetService=function(_,name)if name=="Players"then return playerService elseif name=="RunService"then return{PreSimulation=heartbeat}else return{Shared={Config="config"}}end end},
 		script={Parent={MovementModel="motion",Parent={World={VehicleFactory="factory"}}}},
 		require=function(name)if name=="config"then return config elseif name=="motion"then return Motion else return factory end end,
-		Vector3=r.Vector3,CFrame=r.CFrame,Enum=r.Enum,
+		Vector3=r.Vector3,CFrame=r.CFrame,Color3=r.Color3,Enum=r.Enum,
+		Instance={new=function(class)local obj={ClassName=class,Destroy=function(self)self.destroyed=true end};table.insert(created,obj);return obj end},
 		RaycastParams={new=function()return{}end},OverlapParams={new=function()return{}end},
 		workspace={GetServerTimeNow=function()return clock end,Blockcast=function()return if wall then {}else nil end,
 			GetPartBoundsInBox=function(_,cf)return if overlap or boxBlocked(cf) then {{}}else{}end,
-			Raycast=function(_,origin,direction)
+			Raycast=function(_,origin,direction,params)
 				if direction.Y > -20 then return nil end
-				return if ground then{Position=r.Vector3.new(origin.X,0,origin.Z),Normal=r.Vector3.yAxis}else nil
+				groundFilters=params.FilterDescendantsInstances
+				return if ground then{Position=r.Vector3.new(origin.X,groundY,origin.Z),Normal=r.Vector3.yAxis}else nil
 			end},
 		task={defer=function(fn)table.insert(deferred,fn)end},
 	}})()
@@ -68,6 +74,7 @@ local function setup()
 	return{s=s,a=a,b=b,actors=actors,players=players,heartbeat=heartbeat,
 		time=function(v)clock=v end,wall=function(v)wall=v end,overlap=function(v)overlap=v end,ground=function(v)ground=v end,
 		boxBlocked=function(fn)boxBlocked=fn end,
+		groundY=function(value)groundY=value end,groundFilters=function()return groundFilters end,created=created,
 		flush=function()local pending=deferred;deferred={};for _,fn in pending do fn()end end,
 		moved=function()return moved end,
 		mount=function(p)local slot=s:slot(p);p.root.Position=slot.actor.seat.Position;slot.actor.prompt.Triggered:Fire(p)end}
@@ -157,5 +164,46 @@ test("exit briefly rejects remount; reset cannot schedule a later rider teleport
 	f.time(1);f.mount(f.a);assert(f.a.humanoid.Sit)
 	f.s:reset(f.a,true);local before=f.a.root.Position;f.s:destroy();f.flush()
 	assert(f.a.root.Position==before and f.moved()==2)
+end)
+test("physics frames advance immediately instead of dropping alternating render frames",function()
+	local f=setup();f.mount(f.a);f.s:input(f.a,1,0)
+	local slot=f.s:slot(f.a);local previous=slot.frame.Position
+	for _=1,6 do
+		f.heartbeat:Fire(1/60)
+		assert((slot.frame.Position-previous).Magnitude>0,"every physics frame must move the seat")
+		previous=slot.frame.Position
+	end
+	f.s:destroy()
+end)
+test("road height is damped and other cars and riders cannot become ground",function()
+	local f=setup();f.mount(f.a);f.s:input(f.a,1,0)
+	local slot=f.s:slot(f.a);local before=slot.frame.Position.Y
+	f.groundY(0.25);f.s:tick(1/60)
+	assert(slot.frame.Position.Y>before and slot.frame.Position.Y<before+0.25)
+	local filters=f.groundFilters()
+	assert(table.find(filters,slot.actor.model.Parent)and table.find(filters,f.a.Character)and table.find(filters,f.b.Character))
+	before=slot.frame;f.groundY(6);f.s:tick(1/60)
+	assert(slot.speed==0 and slot.frame==before,"high surfaces must stop driving, not lift the seat")
+	f.s:destroy()
+end)
+test("rider self-collision and auto-rotation are restored on exit and removed on destroy",function()
+	local f=setup();f.mount(f.a)
+	local slot=f.s:slot(f.a);local rider=slot.rider
+	assert(rider and not f.a.humanoid.AutoRotate)
+	local constraints=0
+	for _,obj in f.created do if obj.ClassName=="NoCollisionConstraint"then constraints+=1;assert(obj.Part1==f.a.root)end end
+	assert(constraints==1)
+	f.a.Character.DescendantAdded:Fire({IsA=function(_,name)return name=="BasePart"end})
+	assert(#f.created==3,"new avatar parts must also ignore their own chassis")
+	f.s:exit(f.a);assert(f.a.humanoid.AutoRotate and rider.folder.destroyed and slot.rider==nil)
+	local count=#f.created;f.a.Character.DescendantAdded:Fire(f.a.root);assert(#f.created==count)
+	f.s:destroy()
+	local g=setup();g.a.humanoid.AutoRotate=false;g.mount(g.a)
+	local second=g.s:slot(g.a);local natural=second.rider
+	g.a.humanoid.Sit=false;g.a.humanoid.SeatPart=nil;second.actor.seat.Occupant=nil
+	second.actor.seat.occupantChanged:Fire()
+	assert(natural.folder.destroyed and second.rider==nil and not g.a.humanoid.AutoRotate,"natural unseat preserves pre-existing rotation state")
+	g.a.humanoid.AutoRotate=true;g.mount(g.a);local active=second.rider
+	g.s:destroy();assert(active.folder.destroyed and g.a.humanoid.AutoRotate,"destroy must restore an active rider")
 end)
 print(string.format("%d P4 vehicle/movement tests passed (mocked seat, casts and physics; not Studio)",tests))

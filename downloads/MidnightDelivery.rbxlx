@@ -11,8 +11,8 @@
         <Properties>
           <string name="Name">AudioCatalog</string>
           <string name="Source"><![CDATA[--!strict
--- Roblox 공식 Core-Scripts의 기본 캐릭터 효과음 경로. 숫자 에셋 ID/외부 업로드가 없다.
--- 임시 음색이며 전용 야간 배경음/차량 녹음으로 교체 가능한 단일 카탈로그다.
+-- 알림은 Roblox 내장 음색, 차량은 공개 A-Chassis 1.7.2의 ENG_Engine에 실제 지정된 엔진 루프다.
+-- 출처/Studio 접근 확인 절차: docs/AUDIO_SOURCES.md. 임의 ID나 발소리 대체 재생을 사용하지 않는다.
 return table.freeze({
 	Receipt = { id = "rbxasset://sounds/action_get_up.mp3", volume = 0.35, pitch = 1.5 },
 	Success = { id = "rbxasset://sounds/action_jump.mp3", volume = 0.4, pitch = 1.25 },
@@ -20,7 +20,7 @@ return table.freeze({
 	Down = { id = "rbxasset://sounds/action_jump_land.mp3", volume = 0.4, pitch = 0.65 },
 	Recover = { id = "rbxasset://sounds/action_get_up.mp3", volume = 0.35, pitch = 1 },
 	Wind = { id = "rbxasset://sounds/action_falling.mp3", volume = 0.04, pitch = 0.65 },
-	Motor = { id = "rbxasset://sounds/action_footsteps_plastic.mp3", volume = 0.13, pitch = 0.65 },
+	Motor = { id = "rbxassetid://6002661882", volume = 0.18, pitch = 0.85 },
 })
 ]]></string>
         </Properties>
@@ -44,11 +44,11 @@ return table.freeze({
           <string name="Source"><![CDATA[--!strict
 -- 타이머와 보상은 서버에서도 같은 설정을 사용한다. 주문 3건의 제한과 고객별 조건도 중앙에서 관리한다.
 return table.freeze({
-	Build = "P6 스쿠터 카메라·소유 표시·하차 수정 / 실제 재검증 대기",
+	Build = "P6 스쿠터 떨림·엔진음 수정 / Studio 재검증 대기",
 	Round = table.freeze({ Waiting = 20, Preparing = 10, Playing = 420, Results = 15, MaxPlayers = 4 }),
 	Delivery = table.freeze({ Reward = 80, XP = 20, Distance = 12, Cooldown = 0.6 }),
 	Orders = table.freeze({ Duration = 120, GhostHold = 4, GhostCooldown = 10, GiantHot = 90, GiantCalm = 3, FakeLock = 10 }),
-	Vehicle = table.freeze({ ResetCooldown = 15, MaxSpeed = 38 }),
+	Vehicle = table.freeze({ ResetCooldown = 15, MaxSpeed = 38, RideHeight = 3, GroundResponse = 12, MaxStepHeight = 1 }),
 	Recovery = table.freeze({ DownTime = 12, Protection = 4, RescueHold = 3, RescueDistance = 8,
 		Checkpoints = { Vector3.new(0, 4, -105), Vector3.new(-105, 4, -20), Vector3.new(0, 4, 120), Vector3.new(20, 4, 230) } }),
 	Monster = table.freeze({ GhostDuration = 10, GiantDuration = 12, FakeDuration = 8, PathInterval = 1.5, CatchDistance = 4.5 }),
@@ -1642,20 +1642,21 @@ local Factory = require(script.Parent.Parent.World.VehicleFactory)
 local Service = {}
 Service.__index = Service
 type Actor = { model: Model, seat: VehicleSeat, prompt: ProximityPrompt }
+type Rider = { humanoid: Humanoid, autoRotate: boolean, folder: Folder, connection: RBXScriptConnection }
 type Slot = { actor: Actor, owner: Player?, home: CFrame, frame: CFrame, yaw: number, speed: number,
-	throttle: number, steer: number, inputAt: number, riding: boolean, mountAfter: number }
+	throttle: number, steer: number, inputAt: number, riding: boolean, mountAfter: number, rider: Rider? }
 type States = { root: (any,Player) -> (BasePart?,Humanoid?), canAct: (any,Player) -> boolean }
 type Store = { slots: { Slot }, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> (),
-	connections: { RBXScriptConnection }, cooldowns: { [Player]: number }, stopped: boolean, elapsed: number }
+	connections: { RBXScriptConnection }, cooldowns: { [Player]: number }, stopped: boolean }
 export type Runtime = typeof(setmetatable({} :: Store, Service))
 function Service.new(parent: Instance, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> ()): Runtime
 	local self: Runtime = setmetatable({ slots = {}, states = states, canUse = canUse, changed = changed,
-		authorizedMove = authorizedMove, connections = {}, cooldowns = {}, stopped = false, elapsed = 0 }, Service)
+		authorizedMove = authorizedMove, connections = {}, cooldowns = {}, stopped = false }, Service)
 	for id = 1, 4 do
 		local frame = CFrame.new((id - 2.5) * 12, Config.Map.Spawn.Y + 2, Config.Map.Spawn.Z + 20) * CFrame.Angles(0,math.pi,0)
 		local actor = Factory.create(parent, id, frame)
 		local slot: Slot = { actor = actor, owner = nil, home = frame, frame = frame, yaw = math.pi, speed = 0,
-			throttle = 0, steer = 0, inputAt = 0, riding = false, mountAfter = 0 }
+			throttle = 0, steer = 0, inputAt = 0, riding = false, mountAfter = 0, rider = nil }
 		self.slots[id] = slot
 		table.insert(self.connections, actor.prompt.Triggered:Connect(function(player)
 			local root, humanoid = states:root(player)
@@ -1665,6 +1666,7 @@ function Service.new(parent: Instance, states: States, canUse: (Player) -> boole
 			actor.seat:Sit(humanoid)
 		end))
 		table.insert(self.connections, actor.seat:GetPropertyChangedSignal("Occupant"):Connect(function()
+			self:clearRider(slot)
 			local humanoid = actor.seat.Occupant
 			if humanoid then
 				local character = humanoid.Parent
@@ -1673,20 +1675,42 @@ function Service.new(parent: Instance, states: States, canUse: (Player) -> boole
 					humanoid.Sit = false
 					return
 				end
+				self:bindRider(slot, humanoid)
 			end
 			slot.riding = humanoid ~= nil
 			slot.throttle, slot.steer, slot.speed = 0, 0, 0
 			self.changed()
 		end))
 	end
-	table.insert(self.connections, RunService.Heartbeat:Connect(function(dt)
-		self.elapsed += dt
-		if self.elapsed < 1/30 then return end
-		local step = math.min(self.elapsed,0.05)
-		self.elapsed = 0
-		self:tick(step)
+	-- 좌석 용접을 물리 계산 전에 이동한다. 프레임을 버리는 30Hz 게이트로 인한 불규칙한 계단 이동을 제거한다.
+	table.insert(self.connections, RunService.PreSimulation:Connect(function(dt)
+		self:tick(math.min(dt,0.05))
 	end))
 	return self
+end
+function Service.clearRider(self: Runtime, slot: Slot)
+	local rider = slot.rider
+	if not rider then return end
+	rider.connection:Disconnect()
+	rider.folder:Destroy()
+	if rider.humanoid.Parent then rider.humanoid.AutoRotate = rider.autoRotate end
+	slot.rider = nil
+end
+-- 캐릭터의 기본 충돌 설정을 덮어쓰지 않고 자기 차체와의 접촉만 차단한다. 탑승 중 추가된 액세서리도 포함한다.
+function Service.bindRider(self: Runtime, slot: Slot, humanoid: Humanoid)
+	local character, body = humanoid.Parent, slot.actor.model:FindFirstChild("Body")
+	if not character or not body or not body:IsA("BasePart") then return end
+	local folder = Instance.new("Folder")
+	folder.Name, folder.Parent = "RiderCollision", slot.actor.seat
+	local function exclude(part: Instance)
+		if not part:IsA("BasePart") then return end
+		local constraint = Instance.new("NoCollisionConstraint")
+		constraint.Part0, constraint.Part1, constraint.Parent = body, part, folder
+	end
+	for _, part in character:GetDescendants() do exclude(part) end
+	slot.rider = { humanoid = humanoid, autoRotate = humanoid.AutoRotate, folder = folder,
+		connection = character.DescendantAdded:Connect(exclude) }
+	humanoid.AutoRotate = false
 end
 function Service.slot(self: Runtime, player: Player): Slot?
 	for _, slot in self.slots do if slot.owner == player then return slot end end
@@ -1729,6 +1753,7 @@ function Service.exit(self: Runtime, player: Player, parkAtHome: boolean?)
 	local character = player.Character
 	local root, humanoid = self.states:root(player)
 	local seat = slot.actor.seat
+	self:clearRider(slot)
 	local attached = humanoid ~= nil and humanoid.Sit and (seat.Occupant == humanoid or humanoid.SeatPart == seat)
 	-- Occupant는 Sit=false보다 늦게 복제될 수 있다. 소유 캐릭터의 용접을 먼저 찾아 제거한다.
 	for _, weld in seat:GetChildren() do
@@ -1826,11 +1851,20 @@ function Service.tick(self: Runtime, dt: number)
 		local hit = workspace:Blockcast(frame * CFrame.new(0,0.6,0), Vector3.new(4.5,4.4,7.8), delta, params)
 		if hit then slot.speed = 0; continue end
 		local proposed = frame.Position + delta
-		local ground = workspace:Raycast(proposed + Vector3.new(0,8,0), Vector3.new(0,-35,0), params)
+		-- 다른 차량/탑승자 위로 지면 높이가 튀지 않도록 바닥 광선에서는 모든 차량과 캐릭터를 제외한다.
+		local groundParams = RaycastParams.new()
+		local excluded: { Instance } = { slot.actor.model.Parent :: Instance }
+		for _, other in Players:GetPlayers() do if other.Character then table.insert(excluded,other.Character) end end
+		groundParams.FilterType, groundParams.FilterDescendantsInstances, groundParams.RespectCanCollide = Enum.RaycastFilterType.Exclude, excluded, true
+		local ground = workspace:Raycast(proposed + Vector3.new(0,8,0), Vector3.new(0,-35,0), groundParams)
 		if not ground or math.abs(proposed.X) > 310 or math.abs(proposed.Z) > 310 or ground.Position.Y < -10 then
 			self:reset(player, false); continue
 		end
-		slot.yaw, slot.frame = yaw, CFrame.new(proposed.X, ground.Position.Y + 3, proposed.Z) * CFrame.Angles(0,yaw,0)
+		local targetY = ground.Position.Y + Config.Vehicle.RideHeight
+		if ground.Normal.Y < 0.65 or targetY - slot.frame.Position.Y > Config.Vehicle.MaxStepHeight then slot.speed = 0; continue end
+		-- 도로/차선의 얇은 높이 차이를 즉시 복사하지 않아 좌석과 카메라가 위아래로 튀지 않게 한다.
+		local height = slot.frame.Position.Y + (targetY-slot.frame.Position.Y)*(1-math.exp(-Config.Vehicle.GroundResponse*dt))
+		slot.yaw, slot.frame = yaw, CFrame.new(proposed.X, height, proposed.Z) * CFrame.Angles(0,yaw,0)
 		slot.actor.model:PivotTo(slot.frame)
 	end
 end
@@ -2089,6 +2123,7 @@ function Factory.create(parent: Instance, id: number, frame: CFrame)
 	local seat = Instance.new("VehicleSeat")
 	seat.Name, seat.Size, seat.CFrame = "DriverSeat", Vector3.new(2.2, 0.8, 2.2), frame
 	seat.Anchored, seat.CanTouch, seat.HeadsUpDisplay = true, false, false
+	seat.CanCollide = false
 	seat.Color, seat.Parent = navy, model
 	P.part(model, "Body", Vector3.new(3, 1.3, 6), frame * CFrame.new(0,-0.7,0), orange)
 	P.part(model, "Deck", Vector3.new(3.4,0.35,4), frame * CFrame.new(0,-1,-0.5), navy)
@@ -2108,6 +2143,14 @@ function Factory.create(parent: Instance, id: number, frame: CFrame)
 	prompt.ActionText, prompt.ObjectText, prompt.HoldDuration = "스쿠터 탑승", "배달 스쿠터 " .. id, 0.3
 	-- 차체/배달 상자에 프롬프트 시야가 가려지지 않게 한다. 실제 거리·소유권은 서버에서 다시 검증한다.
 	prompt.MaxActivationDistance, prompt.RequiresLineOfSight, prompt.Parent = 8, false, attach
+	-- 좌석만 고정하고 차체 전체를 한 어셈블리로 묶는다. 장식/상자가 탑승자의 몸과 충돌하지 않게 한다.
+	for _, part in model:GetDescendants() do
+		if not part:IsA("BasePart") or part == seat then continue end
+		part.Anchored, part.Massless, part.CanTouch = false, true, false
+		part.CanCollide = part.Name == "Body"
+		local weld = Instance.new("WeldConstraint")
+		weld.Name, weld.Part0, weld.Part1, weld.Parent = "ChassisWeld", seat, part, part
+	end
 	model.PrimaryPart, model.Parent = seat, parent
 	return { model = model, seat = seat, prompt = prompt }
 end
@@ -2331,6 +2374,7 @@ function Controller.start(settings)
 	group.Name, group.Volume, group.Parent = "MidnightAudio", 1, SoundService
 	local sounds, connections = {}, {}
 	local routed = setmetatable({}, {__mode = "k"})
+	local silencedSteps = {}
 	local stopped, muted = false, false
 	local previous: Types.Snapshot? = nil
 	for name, definition in Catalog do
@@ -2381,18 +2425,41 @@ function Controller.start(settings)
 			sounds.Wind:Play()
 		end
 	end)
+	local function restoreSteps()
+		for sound, volume in silencedSteps do
+			if sound.Parent then sound.Volume = volume end
+		end
+		table.clear(silencedSteps)
+	end
 	local elapsed, dangerAt = 0, 0
 	table.insert(connections,RunService.RenderStepped:Connect(function(dt)
-		elapsed += dt; if elapsed < 0.1 then return end; elapsed = 0
 		local p = Players.LocalPlayer
 		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
 		local seat = humanoid and humanoid.SeatPart
 		local model = seat and seat.Parent
-		local speed = if model then model:GetAttribute("Speed") or 0 else 0
-		if speed > 1 then
-			sounds.Motor.PlaybackSpeed = 0.65 + speed/38*0.9
+		local riding = humanoid and humanoid.Health > 0 and humanoid.Sit and seat and seat:IsA("VehicleSeat")
+			and model and model:GetAttribute("VehicleId") ~= nil and model:GetAttribute("OwnerUserId") == p.UserId
+		if riding then
+			local speed = model:GetAttribute("Speed") or 0
+			local ratio = math.clamp(speed/38,0,1)
+			-- 정차 때도 낮은 공회전을 유지하고 복제되는 속도 값 사이를 부드럽게 연결한다.
+			local alpha = 1-math.exp(-8*math.min(dt,0.1))
+			sounds.Motor.PlaybackSpeed += (Catalog.Motor.pitch+ratio*1.05-sounds.Motor.PlaybackSpeed)*alpha
+			sounds.Motor.Volume += (0.07+ratio*(Catalog.Motor.volume-0.07)-sounds.Motor.Volume)*alpha
 			if not sounds.Motor.Playing then sounds.Motor:Play() end
-		elseif sounds.Motor.Playing then sounds.Motor:Stop() end
+			-- 좌석 이동을 걷기로 오인해 재생되는 기본 Running 소리도 탑승 중에만 억제한다.
+			for _, instance in p.Character:GetDescendants() do
+				if instance:IsA("Sound") and instance.Name == "Running" then
+					if silencedSteps[instance] == nil then silencedSteps[instance] = instance.Volume end
+					instance.Volume = 0
+				end
+			end
+		else
+			if sounds.Motor.Playing then sounds.Motor:Stop() end
+			sounds.Motor.PlaybackSpeed, sounds.Motor.Volume = Catalog.Motor.pitch, 0.07
+			restoreSteps()
+		end
+		elapsed += dt; if elapsed < 0.1 then return end; elapsed = 0
 		if previous and previous.chase.endsAt > workspace:GetServerTimeNow() and os.clock() > dangerAt then
 			play("Danger"); dangerAt = os.clock()+1.2
 		end
@@ -2410,6 +2477,7 @@ function Controller.start(settings)
 		destroy = function()
 			stopped = true
 			for _, connection in connections do connection:Disconnect() end
+			restoreSteps()
 			for sound in routed do if sound.Parent and sound.SoundGroup == group then sound.SoundGroup = nil end end
 			for _, sound in sounds do sound:Destroy() end
 			if disconnectSettings then disconnectSettings()end
@@ -3008,6 +3076,7 @@ function Controller.start()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local entries = {}
 	local activeCamera, activeSeat, smoothed = nil, nil, nil
+	local armLength = nil
 	local binding = "MidnightVehicleCamera"
 	local elapsed = 1
 	local function releaseCamera()
@@ -3017,6 +3086,7 @@ function Controller.start()
 			activeCamera.CameraType = Enum.CameraType.Custom
 		end
 		activeCamera, activeSeat, smoothed = nil, nil, nil
+		armLength = nil
 	end
 	local function clear(model)
 		local entry = entries[model]
@@ -3081,18 +3151,24 @@ function Controller.start()
 				activeCamera, activeSeat = camera, seat
 			end
 			-- 고정된 anchored 좌석에 Roblox 기본 차량 카메라가 재진입하지 않도록 뒤쪽 추적 시점을 직접 갱신한다.
-			local forward = seat.CFrame.LookVector
-			local focus = seat.Position + Vector3.new(0,3,0) + forward*3
-			local position = seat.Position - forward*16 + Vector3.new(0,8,0)
-			local desired = CFrame.lookAt(position,focus)
-			smoothed = if smoothed then smoothed:Lerp(desired,1-math.exp(-12*math.min(dt,0.1))) else desired
+			-- 카메라 위치와 주시점이 서로 다른 시간의 좌석을 보지 않도록 차량 프레임 하나를 보간한다.
+			-- 복구/큰 위치 보정은 즉시 따라가서 오래된 위치에서 지형을 가로질러 이동하지 않게 한다.
+			local desired = seat.CFrame
+			if smoothed and (smoothed.Position-desired.Position).Magnitude >= 24 then armLength = nil end
+			smoothed = if smoothed and (smoothed.Position-desired.Position).Magnitude < 24
+				then smoothed:Lerp(desired,1-math.exp(-12*math.min(dt,0.1))) else desired
+			local forward = smoothed.LookVector
+			local focus = smoothed.Position + Vector3.new(0,3,0) + forward*3
+			local position = smoothed.Position - forward*16 + Vector3.new(0,8,0)
 			local params = RaycastParams.new()
 			params.FilterType, params.FilterDescendantsInstances, params.RespectCanCollide = Enum.RaycastFilterType.Exclude,{model,player.Character},true
-			local delta = smoothed.Position-focus
+			local delta = position-focus
 			local hit = workspace:Raycast(focus,delta,params)
-			if hit then
-				position = focus + delta.Unit*math.max(0.1,hit.Distance-0.6)
-			else position = smoothed.Position end
+			local available = if hit then math.min(delta.Magnitude,math.max(0.1,hit.Distance-0.6)) else delta.Magnitude
+			-- 벽 쪽으로는 즉시 줄이되, 벽을 벗어날 때는 천천히 늘려 줌이 번갈아 튀지 않게 한다.
+			armLength = if not armLength or available < armLength then available
+				else armLength+(available-armLength)*(1-math.exp(-8*math.min(dt,0.1)))
+			position = focus + delta.Unit*armLength
 			camera.CameraType = Enum.CameraType.Scriptable
 			camera.CFrame, camera.Focus = CFrame.lookAt(position,focus), CFrame.new(focus)
 		end

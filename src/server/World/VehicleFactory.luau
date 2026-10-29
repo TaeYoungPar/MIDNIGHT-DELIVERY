@@ -12,6 +12,7 @@ function Factory.create(parent: Instance, id: number, frame: CFrame)
 	local seat = Instance.new("VehicleSeat")
 	seat.Name, seat.Size, seat.CFrame = "DriverSeat", Vector3.new(2.2, 0.8, 2.2), frame
 	seat.Anchored, seat.CanTouch, seat.HeadsUpDisplay = true, false, false
+	seat.CanCollide = false
 	seat.Color, seat.Parent = navy, model
 	P.part(model, "Body", Vector3.new(3, 1.3, 6), frame * CFrame.new(0,-0.7,0), orange)
 	P.part(model, "Deck", Vector3.new(3.4,0.35,4), frame * CFrame.new(0,-1,-0.5), navy)
@@ -31,6 +32,14 @@ function Factory.create(parent: Instance, id: number, frame: CFrame)
 	prompt.ActionText, prompt.ObjectText, prompt.HoldDuration = "스쿠터 탑승", "배달 스쿠터 " .. id, 0.3
 	-- 차체/배달 상자에 프롬프트 시야가 가려지지 않게 한다. 실제 거리·소유권은 서버에서 다시 검증한다.
 	prompt.MaxActivationDistance, prompt.RequiresLineOfSight, prompt.Parent = 8, false, attach
+	-- 좌석만 고정하고 차체 전체를 한 어셈블리로 묶는다. 장식/상자가 탑승자의 몸과 충돌하지 않게 한다.
+	for _, part in model:GetDescendants() do
+		if not part:IsA("BasePart") or part == seat then continue end
+		part.Anchored, part.Massless, part.CanTouch = false, true, false
+		part.CanCollide = part.Name == "Body"
+		local weld = Instance.new("WeldConstraint")
+		weld.Name, weld.Part0, weld.Part1, weld.Parent = "ChassisWeld", seat, part, part
+	end
 	model.PrimaryPart, model.Parent = seat, parent
 	return { model = model, seat = seat, prompt = prompt }
 end
