@@ -16,10 +16,12 @@ local feedback = Instance.new("RemoteEvent")
 feedback.Name, feedback.Parent = Names.Feedback, folder
 local snapshot = Instance.new("RemoteFunction")
 snapshot.Name, snapshot.Parent = Names.Snapshot, folder
-local remotes = { State = state, Feedback = feedback, Snapshot = snapshot }
+local action = Instance.new("RemoteEvent")
+action.Name, action.Parent = Names.Action, folder
+local remotes = { State = state, Feedback = feedback, Snapshot = snapshot, Action = action }
 -- 초기화는 yield 없이 진행한다. FireClient 전 Remote가 DataModel에 속하도록 먼저 공개한다.
 folder.Parent = ReplicatedStorage
 local stop = RoundService.start(world, remotes)
 Players.CharacterAutoLoads = true
 game:BindToClose(stop)
-print("[MidnightDelivery] Server bootstrap ready (P3)")
+print("[MidnightDelivery] Server bootstrap ready (P4)")

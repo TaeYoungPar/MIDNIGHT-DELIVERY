@@ -20,7 +20,7 @@ function Security.allowSnapshot(self: Service, player: Player, now: number): boo
 	return true
 end
 
-function Security.sample(self: Service, player: Player, now: number)
+function Security.sample(self: Service, player: Player, now: number, allowedSpeed: number?)
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -40,11 +40,18 @@ function Security.sample(self: Service, player: Player, now: number)
 		self.records[player] = { character = character, position = position, time = now, blockedUntil = now + 2 }
 		return
 	end
-	-- P1은 도보 전용. 차량 도입 시 실제 서버 승인 이동 모드에 맞게 교체해야 한다.
+	-- 허용 속도는 서버가 확인한 좌석 소유/탑승 상태에서만 확장한다.
 	local delta = position - record.position
 	local horizontal = Vector3.new(delta.X, 0, delta.Z).Magnitude
-	if horizontal > 28 * (now - record.time) + 8 then record.blockedUntil = now + 3 end
+	if horizontal > (allowedSpeed or 28) * (now - record.time) + 8 then record.blockedUntil = now + 3 end
 	record.position, record.time = position, now
+end
+
+function Security.authorizePosition(self: Service, player: Player, now: number)
+	self.records[player] = nil
+	self:sample(player, now)
+	local record = self.records[player]
+	if record then record.blockedUntil = now + 0.5 end
 end
 
 function Security.canDeliver(self: Service, player: Player, target: Vector3, maxDistance: number, now: number, cooldown: number): boolean

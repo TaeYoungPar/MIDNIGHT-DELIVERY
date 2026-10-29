@@ -12,13 +12,21 @@ end
 local stateRemote = folder:WaitForChild(Names.State)
 local feedbackRemote = folder:WaitForChild(Names.Feedback)
 local snapshotRemote = folder:WaitForChild(Names.Snapshot)
-local stateConnection = stateRemote.OnClientEvent:Connect(hud.update)
+local controls = require(script.Parent.Controllers.InputController).start(folder:WaitForChild(Names.Action))
+local audio = require(script.Parent.Controllers.AudioController).start()
+local latestVersion = -1
+local function update(snapshot)
+	if not snapshot or snapshot.version < latestVersion then return end
+	latestVersion = snapshot.version
+	hud.update(snapshot); controls.update(snapshot); audio.update(snapshot)
+end
+local stateConnection = stateRemote.OnClientEvent:Connect(update)
 local feedbackConnection = feedbackRemote.OnClientEvent:Connect(hud.feedback)
 -- 이벤트를 먼저 구독하여 초기 스냅샷 도중 발생한 상태 전환을 놓치지 않는다.
 task.spawn(function()
 	for attempt = 1, 3 do
 		local ok, snapshot = pcall(function() return snapshotRemote:InvokeServer() end)
-		if ok and snapshot then hud.update(snapshot); return end
+		if ok and snapshot then update(snapshot); return end
 		task.wait(1.1)
 	end
 	hud.feedback("상태 동기화 실패 · 다시 입장하세요")
@@ -26,7 +34,9 @@ end)
 script.Destroying:Connect(function()
 	stateConnection:Disconnect()
 	feedbackConnection:Disconnect()
+	controls.destroy()
+	audio.destroy()
 	hud.destroy()
 	stopSpawn()
 end)
-print("[MidnightDelivery] Client GUI ready (P3)")
+print("[MidnightDelivery] Client GUI ready (P4)")

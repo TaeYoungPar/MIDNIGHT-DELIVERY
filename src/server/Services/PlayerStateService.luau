@@ -11,13 +11,13 @@ type Downed = {
 }
 type Rescue = { victim: Player, generation: number, character: Model?, began: number, endedAt: number? }
 type Store = { spawn: SpawnLocation, isParticipant: (Player) -> boolean, changed: () -> (), model: StateModel.Model,
-	bindings: { [Player]: RBXScriptConnection }, downed: { [Player]: Downed }, rescuers: { [Player]: Rescue }, stopped: boolean }
+	bindings: { [Player]: RBXScriptConnection }, downed: { [Player]: Downed }, rescuers: { [Player]: Rescue }, stopped: boolean, authorizedMove: ((Player) -> ())?, beforeDown: ((Player) -> ())? }
 export type Runtime = typeof(setmetatable({} :: Store, Service))
 
-function Service.new(spawn: SpawnLocation, isParticipant: (Player) -> boolean, changed: () -> ()): Runtime
+function Service.new(spawn: SpawnLocation, isParticipant: (Player) -> boolean, changed: () -> (), authorizedMove: ((Player) -> ())?): Runtime
 	return setmetatable({ spawn = spawn, isParticipant = isParticipant, changed = changed,
 		model = StateModel.new(Config.Recovery.DownTime, Config.Recovery.Protection),
-		bindings = {}, downed = {}, rescuers = {}, stopped = false }, Service)
+		authorizedMove = authorizedMove, bindings = {}, downed = {}, rescuers = {}, stopped = false }, Service)
 end
 function Service.now(self: Runtime) return workspace:GetServerTimeNow() end
 function Service.root(self: Runtime, player: Player): (BasePart?, Humanoid?)
@@ -105,6 +105,7 @@ function Service.recover(self: Runtime, player: Player, automatic: boolean): boo
 		record.root.AssemblyLinearVelocity, record.root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
 	end
 	self:clearRecord(player)
+	if automatic and self.authorizedMove then self.authorizedMove(player) end
 	self.changed()
 	return true
 end
@@ -112,6 +113,7 @@ function Service.down(self: Runtime, player: Player): boolean
 	local root, humanoid = self:root(player)
 	local character = player.Character
 	if not character or not root or not humanoid or not self.isParticipant(player) or not self.model:down(player.UserId, self:now()) then return false end
+	if self.beforeDown then self.beforeDown(player) end
 	local attachment = Instance.new("Attachment")
 	attachment.Name, attachment.Parent = "MidnightRescue", root
 	local prompt = Instance.new("ProximityPrompt")
@@ -153,6 +155,17 @@ function Service.tick(self: Runtime)
 	for helper, hold in self.rescuers do
 		if hold.character ~= helper.Character or not self:validRescue(helper, hold.victim)
 			or (hold.endedAt and timestamp - hold.endedAt > 0.2) then self.rescuers[helper] = nil end
+	end
+	for player in self.bindings do
+		local root, humanoid = self:root(player)
+		if root and humanoid and not humanoid.SeatPart and not self.downed[player]
+			and (root.Position.Y < -20 or math.abs(root.Position.X) > 320 or math.abs(root.Position.Z) > 320) then
+			player.Character:PivotTo(self.spawn.CFrame + Vector3.new(0,4,0))
+			root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
+			self.model:reset(player.UserId, timestamp)
+			if self.authorizedMove then self.authorizedMove(player) end
+			self.changed()
+		end
 	end
 	local pending = {}
 	for player, record in self.downed do

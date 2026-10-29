@@ -1,2 +1,2 @@
 --!strict
-return table.freeze({ Folder = "Remotes", State = "GameStateChanged", Feedback = "UIFeedback", Snapshot = "RequestSnapshot" })
+return table.freeze({ Action = "RequestAction", Folder = "Remotes", State = "GameStateChanged", Feedback = "UIFeedback", Snapshot = "RequestSnapshot" })

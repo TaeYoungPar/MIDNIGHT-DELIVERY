@@ -61,6 +61,18 @@ local count = #first.world:GetDescendants()
 for _, instance in first.world:GetDescendants() do
 	if instance:IsA("BasePart") then assert(instance.Anchored, instance.Name) end
 end
+local vehicleFactory = loadModule(node("src/server/World/VehicleFactory"))
+local scooters = {}
+for id = 1, 4 do
+	local actor = vehicleFactory.create(first.world.Vehicles, id, r.CFrame.new(id*12,3,-99))
+	assert(actor.seat.ClassName == "VehicleSeat" and actor.seat.Anchored and not actor.seat.CanTouch)
+	assert(actor.model.PrimaryPart == actor.seat and actor.prompt.MaxActivationDistance == 8)
+	assert(actor.model:GetAttribute("OwnerUserId") == 0)
+	for _, part in actor.model:GetDescendants() do if part:IsA("BasePart") then assert(part.Anchored) end end
+	table.insert(scooters,actor)
+end
+assert(#first.world.Vehicles:GetChildren() == 4)
+for _, actor in scooters do actor.model:Destroy() end
 local monsterFactory = loadModule(node("src/server/World/MonsterFactory"))
 for _, kind in { "Ghost", "Giant", "Fake" } do
 	local actor = monsterFactory.create(first.world.NPCs, kind, r.Vector3.new(0, 7, 0))

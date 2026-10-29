@@ -1,35 +1,33 @@
 # 구현 현황 · 2026-10-29 (한국 시간)
 
-## 현재 범위
+## 현재 빌드
 
-P0/P1 기반, P2 주문 3종, P3 추격·기절·구조 코드를 구현했습니다. 사용자에게서 이전 빌드의 기본 실행/배달 피드백을 받았지만, **P3 실제 Studio 플레이/모바일/4인 검증은 아직 NOT TESTED**입니다. 출시 가능한 상태로 선언하지 않습니다.
+P0~P3 기반 위에 P4 스쿠터/입력/복구 코드와 임시 사운드/음소거를 추가했습니다. **P3/P4 실제 Studio·모바일·4인 검증은 아직 NOT TESTED**입니다. 사용자는 현재 실행 확인이 어려워 독립적으로 가능한 구현/모의 검증을 진행했습니다. 출시 또는 P4 통과로 선언하지 않습니다.
 
-## P0/P1/P2 기반
+## 이전 기반
 
-Rojo 매핑/서버·클라이언트 Bootstrap, 자동 생성 네온 마을, 서버 타이머, 세션 Coins/XP, 참가자 확정/중도 합류 대기, HUD/결과/다음 라운드를 유지합니다. 3건 순차 주문은 유령 노크·정면 유지 / 거인 온도·진정 / 가짜 집 단서·오배송으로 구분됩니다. 주문당 120초, 정상 80 Coins, 식은 음식 56 Coins, 전체 성공 보너스 120 Coins.
+코드 생성 네온 마을, 서버 라운드, 고객 3종/순차 배달/보상, 추격 NPC 3종, 기절·구조·자동 복귀, 도로 방향 스폰/초기 카메라, HUD를 유지합니다. 원본 설계 문서 8개는 변경하지 않았습니다.
 
-파란 지붕집 안내는 좌표 기반 3D 화살표/양면 문자판으로 수정했고 지붕을 파란색으로 맞췄습니다. 서버 스폰 CFrame과 캐릭터 Pivot 방향은 도로(+Z)를 향하며 초기 카메라도 새 캐릭터마다 한 번 정렬합니다.
+## P4 추가 파일/연결
 
-## P3 구현 파일
+- `World/VehicleFactory.luau`: 둥근 전조등/두 바퀴/핸들/야식 박스/개인 표식의 외부 에셋 없는 스쿠터 모델.
+- `Services/VehicleService.luau`: 스쿠터 4대, 유저별 1대, 서버 탑승/소유/생존/좌석 거리 검증, 서버 속도/조향, 30Hz 아케이드 이동, Box sweep/회전 overlap 검사, 입력 timeout 제동, 지면/경계 복구, 소유자 복구 15초 쿨다운, 기절 시 SeatWeld 안전 해제.
+- `Services/MovementModel.luau`: 스프린트 16→22, 5초 소진/충전, 전진 38/후진 12, 가속/제동/유효 축 순수 로직.
+- `Services/ActionLimiter.luau`: Remote burst/빈도 제한. `RoundService`에서 액션 허용 목록·roundId·자료형·권한 재검증.
+- `SecurityService`: 실제 소유 차량 좌석 탑승 시에만 서버 허용 이동 속도 확장. 정상 서버 복구 위치 이동은 별도 승인 경로.
+- `PlayerStateService`: 낙하/외곽 이탈 본부 복귀, 차량 하차 후 기절 연결.
+- `client/Controllers/InputController.luau`: 키보드/네이티브 좌석 입력, 모바일 48px 방향 버튼, 하차/복구/달리기, 포커스 이탈·텍스트 입력 처리. 모바일 주문 카드는 기본 접힘.
+- `shared/AudioCatalog.luau`, `client/Controllers/AudioController.luau`: 공식 Roblox 기본 사운드 경로, 접수/성공/추격/기절/복귀 알림, 바람/주행 루프, 음소거/해제, 로딩 실패 경고와 연결 정리.
 
-- `Services/PlayerStateModel.luau`: 기절 12초, 세대 키로 구조/자동 복귀 경합 방지, 복귀 보호 4초.
-- `Services/PlayerStateService.luau`: 스폰/리스폰, 이동·배달 제한, 서버 근접/생존/참가/시야/3초 홀드 검사, 팀 구조/솔로 도로 복귀, 이탈·리스폰·라운드 정리.
-- `World/MonsterFactory.luau`: 외부 에셋 없는 유령/거인/집 괴물. 단일 용접 Humanoid 어셈블리, 고객별 실루엣.
-- `Services/MonsterService.luau`: 한 번에 한 서버 소유 NPC, 10/12/8초 추격, Pathfinding 계산 간격/MoveTo 폴백, 서버 근접+시야 판정, 기절/대상 이탈/캐릭터 교체/보호/라운드 종료 정리, 취소된 비동기 결과 무시.
-- `Services/RoundService.luau`: 고객별 규칙 위반과 추격 연결, 기절 중 배달 거부, 주문 종료 시 NPC 정리.
-- `client/Controllers/SpawnController.luau`: 도로 방향 초기 카메라 후 기본 카메라 조작 유지.
-- HUD: 추격·기절·복귀 보호·팀원 구조 필요 표시.
+## 직접 검사
 
-## 직접 실행한 검증
+- 번호 있는 로직/대역 테스트 **47개 PASS**: 기존 36 + 낙하 1 + 차량/이동 10.
+- 별도 오디오 연결/음소거/루프/정리 mock 검사 PASS. 실제 청취 검사가 아님.
+- RoundService 통합 mock PASS: 주문·보상·합류·추격 연결 및 새 액션의 구 roundId/허용되지 않은 보상 요청 거부.
+- 월드/괴물/스쿠터 데이터 모델: 스쿠터 4대/VehicleSeat/앵커/프롬프트 구성 PASS.
+- Luau 컴파일, 엔진 비의존 모델 타입 검사, Rojo **32개 소스** 포함/일치 PASS.
+- 배포 파일은 직접 `.rbxlx`로 갱신하며 ZIP을 만들지 않습니다.
 
-- 기존 23개 + 기절/구조 7개 + 추격 6개 = **36개** 로직/대역 테스트 PASS.
-- 실제 RoundService를 mock 신호로 실행한 통합 검사 PASS. 3종 추격 훅/순차 주문/보상/합류/정리.
-- Lune 데이터 모델: 월드 294개 descendants, 안내판/스폰 방향, 세 괴물 어셈블리/용접/속성 검사 PASS.
-- Luau 컴파일, 엔진 비의존 핵심 모델 strict 타입 검사, Rojo 빌드와 **25개 소스** 일치 검사 PASS.
-- 배포 rbxlx와 검증 빌드 바이트 일치 PASS. 실제 Roblox 엔진 물리/렌더링/복제 테스트는 아님.
+## 남은 단계
 
-## 배포와 다음 단계
-
-`tools/package.py`는 `downloads/MidnightDelivery.rbxlx` 직접 파일만 갱신합니다. 사용자의 요청에 따라 ZIP 생성/배포를 중단했습니다. GitHub Download raw file로 받아 Studio에서 바로 엽니다.
-
-다음은 docs/TESTING.md의 P3 Studio 검증과 실패 수정, P4 스쿠터/모바일/낙하 복구, P5 영구 저장/상점, P6 접근성·실기기·출시 QA입니다. 원본 설계 문서 8개는 변경하지 않았습니다.
+P4 Studio 게이트: 실제 좌석 용접/주행/벽·경사·복구, 2·4인/네트워크 지연, 실제 모바일 UI/소리/30FPS. 실패를 수정한 다음 P5 저장/레벨/꾸미기 상점과 P6 접근성·사운드 폴리시·실기기·출시 QA로 진행합니다.

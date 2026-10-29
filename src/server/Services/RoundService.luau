@@ -11,16 +11,21 @@ local Security = require(script.Parent.SecurityService)
 local Economy = require(script.Parent.EconomyService)
 local PlayerStates = require(script.Parent.PlayerStateService)
 local Monsters = require(script.Parent.MonsterService)
+local Vehicles = require(script.Parent.VehicleService)
+local Movement = require(script.Parent.MovementModel)
+local ActionLimiter = require(script.Parent.ActionLimiter)
 local RoundService = {}
 type Destination = { prompt: ProximityPrompt, target: Vector3, door: Part }
 type World = { world: Folder, spawn: SpawnLocation, destinations: { [string]: Destination }, fakeCenter: Vector3 }
-type Remotes = { State: RemoteEvent, Feedback: RemoteEvent, Snapshot: RemoteFunction }
+type Remotes = { State: RemoteEvent, Feedback: RemoteEvent, Snapshot: RemoteFunction, Action: RemoteEvent }
 
 function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local model = RoundModel.new(Config.Round)
 	local orders: OrderModel.Model? = nil
 	local security, economy = Security.new(), Economy.new()
-	local playerStates, monsters
+	local playerStates, monsters, vehicles
+	local limiter = ActionLimiter.new()
+	local runners = {}
 	local version, elapsed = 0, 0
 	local connections = {}
 	local holds: { [Player]: { index: number, destination: string, began: number } } = {}
@@ -38,6 +43,8 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		local target = if spec and spec.kind == "Fake" then world.fakeCenter
 			elseif spec then world.destinations[spec.destination].target else nil
 		return {
+			vehicle = if vehicles then vehicles:status(player) else { owned = false, seated = false, speed = 0, resetAt = 0 },
+			stamina = if runners[player] then runners[player].value else 5,
 			downUntil = status.downUntil, protectedUntil = status.protectedUntil, members = members,
 			chase = if monsters then monsters:status() else { kind = "", endsAt = 0, targetId = 0 },
 			version = version, phase = model.phase, roundId = model.roundId, endsAt = model.endsAt,
@@ -70,8 +77,14 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local function participant(player)
 		return model.phase == "PLAYING" and model.participants[player.UserId] == true
 	end
-	playerStates = if dependencies and dependencies.playerStates then dependencies.playerStates else PlayerStates.new(world.spawn, participant, publish)
+	playerStates = if dependencies and dependencies.playerStates then dependencies.playerStates else PlayerStates.new(world.spawn, participant, publish, function(player) security:authorizePosition(player, now()) end)
 	monsters = if dependencies and dependencies.monsters then dependencies.monsters else Monsters.new(world.world:FindFirstChild("NPCs"), playerStates, publish)
+	local function canRide(player)
+		return model.phase == "WAITING" or model.participants[player.UserId] == true
+	end
+	vehicles = if dependencies and dependencies.vehicles then dependencies.vehicles else Vehicles.new(world.world:FindFirstChild("Vehicles"), playerStates, canRide, publish,
+		function(player) security:authorizePosition(player, now()) end)
+	playerStates.beforeDown = function(player) vehicles:exit(player) end
 	local function chase(kind, player, destinationId)
 		local destination = world.destinations[destinationId]
 		if destination and player then monsters:start(kind, player, destination.target + Vector3.new(0, 0, -10)) end
@@ -103,14 +116,18 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	end
 	local function add(player: Player)
 		economy:add(player)
+		runners[player] = { value = 5, exhausted = false, wants = false, inputAt = 0 }
+		vehicles:add(player)
 		player:SetAttribute("RoundReward", 0)
+		player:SetAttribute("Stamina", 5)
 		playerStates:add(player)
 		publish()
 	end
 	for _, player in Players:GetPlayers() do add(player) end
 	table.insert(connections, Players.PlayerAdded:Connect(add))
 	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
-		model:remove(player.UserId); security:remove(player); economy:remove(player); playerStates:remove(player)
+		model:remove(player.UserId); security:remove(player); economy:remove(player); vehicles:remove(player); playerStates:remove(player)
+		runners[player] = nil; limiter:remove(player.UserId)
 		holds[player] = nil
 		task.defer(publish)
 	end))
@@ -118,6 +135,16 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		if not security:allowSnapshot(player, now()) then return nil end
 		return snapshot(player)
 	end
+	table.insert(connections, remotes.Action.OnServerEvent:Connect(function(player, payload)
+		if not limiter:allow(player.UserId, now()) or typeof(payload) ~= "table" or payload.roundId ~= model.roundId then return end
+		if payload.kind == "VehicleInput" then vehicles:input(player, payload.throttle, payload.steer)
+		elseif payload.kind == "ResetVehicle" then vehicles:reset(player, true); publish()
+		elseif payload.kind == "ExitVehicle" then vehicles:exit(player); publish()
+		elseif payload.kind == "Sprint" and typeof(payload.enabled) == "boolean" then
+			local runner = runners[player]
+			if runner then runner.wants, runner.inputAt = payload.enabled and playerStates:canAct(player), now() end
+		end
+	end))
 	local function inRange(player: Player, destination: Destination): boolean
 		local char = player.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -134,7 +161,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		table.insert(connections, destination.prompt.Triggered:Connect(function(player)
 			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or now() >= model.endsAt or not playerStates:canAct(player) then return end
 			local timestamp = now()
-			security:sample(player, timestamp)
+			security:sample(player, timestamp, if vehicles:seated(player) then 46 else 28)
 			if not security:canDeliver(player, destination.target, Config.Delivery.Distance, timestamp, Config.Delivery.Cooldown) then return end
 			local hold = holds[player]
 			local heldFor = if hold and hold.index == orders.index and hold.destination == id then timestamp - hold.began else 0
@@ -169,7 +196,19 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		playerStates:tick()
 		monsters:tick()
 		local timestamp, ids = now(), {}
-		for _, player in Players:GetPlayers() do security:sample(player, timestamp); table.insert(ids, player.UserId) end
+		for _, player in Players:GetPlayers() do
+			security:sample(player, timestamp, if vehicles:seated(player) then 46 else 28)
+			local runner = runners[player]
+			local root, humanoid = playerStates:root(player)
+			if runner and root and humanoid then
+				local velocity = root.AssemblyLinearVelocity or Vector3.zero
+				local speed = Movement.stamina(runner, runner.wants and timestamp - runner.inputAt < 0.6,
+					Vector3.new(velocity.X,0,velocity.Z).Magnitude > 1, playerStates:canAct(player) and not vehicles:seated(player), 0.1)
+				if math.abs((player:GetAttribute("Stamina") or 5) - runner.value) > 0.2 then player:SetAttribute("Stamina", runner.value) end
+				if playerStates:canAct(player) then humanoid.WalkSpeed = speed end
+			end
+			table.insert(ids, player.UserId)
+		end
 		for player, hold in holds do
 			local dest = world.destinations[hold.destination]
 			if not orders or hold.index ~= orders.index or not dest or not playerStates:canAct(player) or not inRange(player, dest) then holds[player] = nil end
@@ -211,6 +250,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	publish()
 	return function()
 		for _, connection in connections do connection:Disconnect() end
+		vehicles:destroy()
 		monsters:destroy()
 		playerStates:destroy()
 		remotes.Snapshot.OnServerInvoke = nil

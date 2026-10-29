@@ -59,7 +59,7 @@ for index, id in {"ghost_house", "giant_house", "fake_1", "fake_2", "fake_3"} do
 end
 local snapshots = {}
 local remotes = { State = {FireClient = function(_, p, snapshot) snapshots[p.UserId] = snapshot end},
-	Feedback = {FireClient = function() end}, Snapshot = {} }
+	Feedback = {FireClient = function() end}, Snapshot = {}, Action = {OnServerEvent = signal()} }
 local p = makePlayer(1); table.insert(players, p)
 local chaseKinds = {}
 local stateStub = {
@@ -73,7 +73,13 @@ local monsterStub = {
 	stop = function() end, tick = function() end, destroy = function() end,
 	status = function() return { kind = "", endsAt = 0, targetId = 0 } end,
 }
-local stop = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub})
+local driveRequests = 0
+local vehicleStub = {
+	add = function() end, remove = function() end, exit = function() end, reset = function() return true end,
+	input = function() driveRequests += 1; return true end, destroy = function() end, seated = function() return false end,
+	status = function() return { owned = false, seated = false, speed = 0, resetAt = 0 } end,
+}
+local stop = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub})
 local function step(time)
 	clock = time; heartbeat:Fire(0.1)
 end
@@ -83,6 +89,12 @@ local function move(destination)
 	p.root.CFrame = r.CFrame.new(p.root.Position) * r.CFrame.Angles(0, math.pi, 0)
 end
 local function trigger(id) world.destinations[id].prompt.Triggered:Fire(p) end
+remotes.Action.OnServerEvent:Fire(p,{kind="VehicleInput",roundId=-1,throttle=1,steer=0})
+assert(driveRequests==0,"stale-round driving must be rejected before dispatch")
+remotes.Action.OnServerEvent:Fire(p,{kind="VehicleInput",roundId=0,throttle=1,steer=0})
+assert(driveRequests==1)
+remotes.Action.OnServerEvent:Fire(p,{kind="GiveCoins",roundId=0,coins=9999})
+assert(p:GetAttribute("Coins")==0,"unknown actions may not grant currency")
 step(0); step(20); assert(snapshots[1].phase == "PREPARING")
 step(30); assert(snapshots[1].phase == "PLAYING" and snapshots[1].orderIndex == 1)
 local spectator = makePlayer(2); table.insert(players, spectator); added:Fire(spectator)
@@ -117,7 +129,7 @@ for _, dest in world.destinations do assert(not dest.prompt.Enabled) end
 assert(remotes.Snapshot.OnServerInvoke == nil)
 -- 별도 라운드에서 유령 규칙 위반과 가짜 집 오답도 실제 추격 연결을 호출해야 한다.
 clock = 500
-local stopAgain = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub})
+local stopAgain = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub})
 step(500); step(520); step(530)
 move("ghost_house"); step(535); trigger("ghost_house"); step(536); trigger("ghost_house"); step(537); trigger("ghost_house")
 p.root.CFrame = r.CFrame.identity; step(538)

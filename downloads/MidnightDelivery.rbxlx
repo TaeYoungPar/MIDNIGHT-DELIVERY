@@ -9,14 +9,33 @@
       </Properties>
       <Item class="ModuleScript" referent="2">
         <Properties>
+          <string name="Name">AudioCatalog</string>
+          <string name="Source"><![CDATA[--!strict
+-- Roblox 공식 Core-Scripts의 기본 캐릭터 효과음 경로. 숫자 에셋 ID/외부 업로드가 없다.
+-- 임시 음색이며 전용 야간 배경음/차량 녹음으로 교체 가능한 단일 카탈로그다.
+return table.freeze({
+	Receipt = { id = "rbxasset://sounds/action_get_up.mp3", volume = 0.35, pitch = 1.5 },
+	Success = { id = "rbxasset://sounds/action_jump.mp3", volume = 0.4, pitch = 1.25 },
+	Danger = { id = "rbxasset://sounds/action_jump_land.mp3", volume = 0.4, pitch = 0.8 },
+	Down = { id = "rbxasset://sounds/action_jump_land.mp3", volume = 0.4, pitch = 0.65 },
+	Recover = { id = "rbxasset://sounds/action_get_up.mp3", volume = 0.35, pitch = 1 },
+	Wind = { id = "rbxasset://sounds/action_falling.mp3", volume = 0.04, pitch = 0.65 },
+	Motor = { id = "rbxasset://sounds/action_footsteps_plastic.mp3", volume = 0.13, pitch = 0.65 },
+})
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
           <string name="Name">Config</string>
           <string name="Source"><![CDATA[--!strict
 -- 타이머와 보상은 서버에서도 같은 설정을 사용한다. 주문 3건의 제한과 고객별 조건도 중앙에서 관리한다.
 return table.freeze({
-	Build = "P3 추격·기절·구조 / Studio 검증 대기",
+	Build = "P4 스쿠터·모바일·사운드 / Studio 검증 대기",
 	Round = table.freeze({ Waiting = 20, Preparing = 10, Playing = 420, Results = 15, MaxPlayers = 4 }),
 	Delivery = table.freeze({ Reward = 80, XP = 20, Distance = 12, Cooldown = 0.6 }),
 	Orders = table.freeze({ Duration = 120, GhostHold = 4, GhostCooldown = 10, GiantHot = 90, GiantCalm = 3, FakeLock = 10 }),
+	Vehicle = table.freeze({ ResetCooldown = 15, MaxSpeed = 38 }),
 	Recovery = table.freeze({ DownTime = 12, Protection = 4, RescueHold = 3, RescueDistance = 8,
 		Checkpoints = { Vector3.new(0, 4, -105), Vector3.new(-105, 4, -20), Vector3.new(0, 4, 120), Vector3.new(20, 4, 230) } }),
 	Monster = table.freeze({ GhostDuration = 10, GiantDuration = 12, FakeDuration = 8, PathInterval = 1.5, CatchDistance = 4.5 }),
@@ -32,7 +51,7 @@ return table.freeze({
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="3">
+      <Item class="ModuleScript" referent="4">
         <Properties>
           <string name="Name">OrderCatalog</string>
           <string name="Source"><![CDATA[--!strict
@@ -47,15 +66,15 @@ return table.freeze({
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="4">
+      <Item class="ModuleScript" referent="5">
         <Properties>
           <string name="Name">RemoteNames</string>
           <string name="Source"><![CDATA[--!strict
-return table.freeze({ Folder = "Remotes", State = "GameStateChanged", Feedback = "UIFeedback", Snapshot = "RequestSnapshot" })
+return table.freeze({ Action = "RequestAction", Folder = "Remotes", State = "GameStateChanged", Feedback = "UIFeedback", Snapshot = "RequestSnapshot" })
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="5">
+      <Item class="ModuleScript" referent="6">
         <Properties>
           <string name="Name">Strings</string>
           <string name="Source"><![CDATA[--!strict
@@ -74,12 +93,13 @@ return table.freeze({
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="6">
+      <Item class="ModuleScript" referent="7">
         <Properties>
           <string name="Name">Types</string>
           <string name="Source"><![CDATA[--!strict
 export type Phase = "WAITING" | "PREPARING" | "PLAYING" | "RESULTS"
 export type Snapshot = {
+	vehicle: { owned: boolean, seated: boolean, speed: number, resetAt: number }, stamina: number,
 	downUntil: number, protectedUntil: number, members: { { name: string, downUntil: number } },
 	chase: { kind: string, targetId: number, endsAt: number },
 	version: number, phase: Phase, roundId: number, endsAt: number,
@@ -95,15 +115,15 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="7">
+  <Item class="ServerScriptService" referent="8">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="8">
+    <Item class="Folder" referent="9">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="Script" referent="9">
+      <Item class="Script" referent="10">
         <Properties>
           <string name="Name">Bootstrap</string>
           <token name="RunContext">0</token>
@@ -125,21 +145,48 @@ local feedback = Instance.new("RemoteEvent")
 feedback.Name, feedback.Parent = Names.Feedback, folder
 local snapshot = Instance.new("RemoteFunction")
 snapshot.Name, snapshot.Parent = Names.Snapshot, folder
-local remotes = { State = state, Feedback = feedback, Snapshot = snapshot }
+local action = Instance.new("RemoteEvent")
+action.Name, action.Parent = Names.Action, folder
+local remotes = { State = state, Feedback = feedback, Snapshot = snapshot, Action = action }
 -- 초기화는 yield 없이 진행한다. FireClient 전 Remote가 DataModel에 속하도록 먼저 공개한다.
 folder.Parent = ReplicatedStorage
 local stop = RoundService.start(world, remotes)
 Players.CharacterAutoLoads = true
 game:BindToClose(stop)
-print("[MidnightDelivery] Server bootstrap ready (P3)")
+print("[MidnightDelivery] Server bootstrap ready (P4)")
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="10">
+      <Item class="Folder" referent="11">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="ModuleScript" referent="11">
+        <Item class="ModuleScript" referent="12">
+          <Properties>
+            <string name="Name">ActionLimiter</string>
+            <string name="Source"><![CDATA[--!strict
+-- 하나의 플레이어가 Remote를 몰아서 보내도 엔진 작업량을 제한한다.
+local Limiter = {}
+Limiter.__index = Limiter
+type Entry = { tokens: number, time: number }
+type Store = { records: { [number]: Entry } }
+export type Model = typeof(setmetatable({} :: Store, Limiter))
+function Limiter.new(): Model return setmetatable({ records = {} }, Limiter) end
+function Limiter.allow(self: Model, id: number, now: number): boolean
+	local entry = self.records[id]
+	if not entry then entry = { tokens = 20, time = now }; self.records[id] = entry end
+	entry.tokens = math.min(20, entry.tokens + math.max(0, now - entry.time) * 15)
+	entry.time = now
+	if entry.tokens < 1 then return false end
+	entry.tokens -= 1
+	return true
+end
+function Limiter.remove(self: Model, id: number) self.records[id] = nil end
+return Limiter
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="13">
           <Properties>
             <string name="Name">EconomyService</string>
             <string name="Source"><![CDATA[--!strict
@@ -185,7 +232,7 @@ return Economy
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="12">
+        <Item class="ModuleScript" referent="14">
           <Properties>
             <string name="Name">MonsterService</string>
             <string name="Source"><![CDATA[--!strict
@@ -283,7 +330,35 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="13">
+        <Item class="ModuleScript" referent="15">
+          <Properties>
+            <string name="Name">MovementModel</string>
+            <string name="Source"><![CDATA[--!strict
+-- 스프린트와 차량 수치는 순수 함수로 검사한다. 클라이언트 속도 주장은 받지 않는다.
+local Model = {}
+export type Stamina = { value: number, exhausted: boolean }
+function Model.stamina(state: Stamina, wants: boolean, moving: boolean, enabled: boolean, dt: number): number
+	dt = math.clamp(dt, 0, 0.2)
+	local running = wants and moving and enabled and not state.exhausted and state.value > 0
+	state.value = math.clamp(state.value + (if running then -dt else dt), 0, 5)
+	if state.value <= 0.001 then state.exhausted = true end
+	if state.value >= 4.999 then state.exhausted = false end
+	return if running then 22 else 16
+end
+function Model.speed(speed: number, throttle: number, dt: number, maximum: number?): number
+	local target = if throttle >= 0 then throttle * (maximum or 38) else throttle * 12
+	local rate = if throttle == 0 then 26 else 18
+	return speed + math.clamp(target - speed, -rate * dt, rate * dt)
+end
+function Model.input(throttle: any, steer: any): boolean
+	return typeof(throttle) == "number" and typeof(steer) == "number" and throttle == throttle and steer == steer
+		and math.abs(throttle) <= 1 and math.abs(steer) <= 1
+end
+return Model
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">OrderModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -379,7 +454,7 @@ return Order
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">OrderPlanner</string>
             <string name="Source"><![CDATA[--!strict
@@ -400,7 +475,7 @@ return Planner
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">PlayerStateModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -440,7 +515,7 @@ return State
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">PlayerStateService</string>
             <string name="Source"><![CDATA[--!strict
@@ -456,13 +531,13 @@ type Downed = {
 }
 type Rescue = { victim: Player, generation: number, character: Model?, began: number, endedAt: number? }
 type Store = { spawn: SpawnLocation, isParticipant: (Player) -> boolean, changed: () -> (), model: StateModel.Model,
-	bindings: { [Player]: RBXScriptConnection }, downed: { [Player]: Downed }, rescuers: { [Player]: Rescue }, stopped: boolean }
+	bindings: { [Player]: RBXScriptConnection }, downed: { [Player]: Downed }, rescuers: { [Player]: Rescue }, stopped: boolean, authorizedMove: ((Player) -> ())?, beforeDown: ((Player) -> ())? }
 export type Runtime = typeof(setmetatable({} :: Store, Service))
 
-function Service.new(spawn: SpawnLocation, isParticipant: (Player) -> boolean, changed: () -> ()): Runtime
+function Service.new(spawn: SpawnLocation, isParticipant: (Player) -> boolean, changed: () -> (), authorizedMove: ((Player) -> ())?): Runtime
 	return setmetatable({ spawn = spawn, isParticipant = isParticipant, changed = changed,
 		model = StateModel.new(Config.Recovery.DownTime, Config.Recovery.Protection),
-		bindings = {}, downed = {}, rescuers = {}, stopped = false }, Service)
+		authorizedMove = authorizedMove, bindings = {}, downed = {}, rescuers = {}, stopped = false }, Service)
 end
 function Service.now(self: Runtime) return workspace:GetServerTimeNow() end
 function Service.root(self: Runtime, player: Player): (BasePart?, Humanoid?)
@@ -550,6 +625,7 @@ function Service.recover(self: Runtime, player: Player, automatic: boolean): boo
 		record.root.AssemblyLinearVelocity, record.root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
 	end
 	self:clearRecord(player)
+	if automatic and self.authorizedMove then self.authorizedMove(player) end
 	self.changed()
 	return true
 end
@@ -557,6 +633,7 @@ function Service.down(self: Runtime, player: Player): boolean
 	local root, humanoid = self:root(player)
 	local character = player.Character
 	if not character or not root or not humanoid or not self.isParticipant(player) or not self.model:down(player.UserId, self:now()) then return false end
+	if self.beforeDown then self.beforeDown(player) end
 	local attachment = Instance.new("Attachment")
 	attachment.Name, attachment.Parent = "MidnightRescue", root
 	local prompt = Instance.new("ProximityPrompt")
@@ -599,6 +676,17 @@ function Service.tick(self: Runtime)
 		if hold.character ~= helper.Character or not self:validRescue(helper, hold.victim)
 			or (hold.endedAt and timestamp - hold.endedAt > 0.2) then self.rescuers[helper] = nil end
 	end
+	for player in self.bindings do
+		local root, humanoid = self:root(player)
+		if root and humanoid and not humanoid.SeatPart and not self.downed[player]
+			and (root.Position.Y < -20 or math.abs(root.Position.X) > 320 or math.abs(root.Position.Z) > 320) then
+			player.Character:PivotTo(self.spawn.CFrame + Vector3.new(0,4,0))
+			root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
+			self.model:reset(player.UserId, timestamp)
+			if self.authorizedMove then self.authorizedMove(player) end
+			self.changed()
+		end
+	end
 	local pending = {}
 	for player, record in self.downed do
 		local entry = self.model.entries[player.UserId]
@@ -624,7 +712,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">RoundModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -707,7 +795,7 @@ return RoundModel
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">RoundService</string>
             <string name="Source"><![CDATA[--!strict
@@ -723,16 +811,21 @@ local Security = require(script.Parent.SecurityService)
 local Economy = require(script.Parent.EconomyService)
 local PlayerStates = require(script.Parent.PlayerStateService)
 local Monsters = require(script.Parent.MonsterService)
+local Vehicles = require(script.Parent.VehicleService)
+local Movement = require(script.Parent.MovementModel)
+local ActionLimiter = require(script.Parent.ActionLimiter)
 local RoundService = {}
 type Destination = { prompt: ProximityPrompt, target: Vector3, door: Part }
 type World = { world: Folder, spawn: SpawnLocation, destinations: { [string]: Destination }, fakeCenter: Vector3 }
-type Remotes = { State: RemoteEvent, Feedback: RemoteEvent, Snapshot: RemoteFunction }
+type Remotes = { State: RemoteEvent, Feedback: RemoteEvent, Snapshot: RemoteFunction, Action: RemoteEvent }
 
 function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local model = RoundModel.new(Config.Round)
 	local orders: OrderModel.Model? = nil
 	local security, economy = Security.new(), Economy.new()
-	local playerStates, monsters
+	local playerStates, monsters, vehicles
+	local limiter = ActionLimiter.new()
+	local runners = {}
 	local version, elapsed = 0, 0
 	local connections = {}
 	local holds: { [Player]: { index: number, destination: string, began: number } } = {}
@@ -750,6 +843,8 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		local target = if spec and spec.kind == "Fake" then world.fakeCenter
 			elseif spec then world.destinations[spec.destination].target else nil
 		return {
+			vehicle = if vehicles then vehicles:status(player) else { owned = false, seated = false, speed = 0, resetAt = 0 },
+			stamina = if runners[player] then runners[player].value else 5,
 			downUntil = status.downUntil, protectedUntil = status.protectedUntil, members = members,
 			chase = if monsters then monsters:status() else { kind = "", endsAt = 0, targetId = 0 },
 			version = version, phase = model.phase, roundId = model.roundId, endsAt = model.endsAt,
@@ -782,8 +877,14 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local function participant(player)
 		return model.phase == "PLAYING" and model.participants[player.UserId] == true
 	end
-	playerStates = if dependencies and dependencies.playerStates then dependencies.playerStates else PlayerStates.new(world.spawn, participant, publish)
+	playerStates = if dependencies and dependencies.playerStates then dependencies.playerStates else PlayerStates.new(world.spawn, participant, publish, function(player) security:authorizePosition(player, now()) end)
 	monsters = if dependencies and dependencies.monsters then dependencies.monsters else Monsters.new(world.world:FindFirstChild("NPCs"), playerStates, publish)
+	local function canRide(player)
+		return model.phase == "WAITING" or model.participants[player.UserId] == true
+	end
+	vehicles = if dependencies and dependencies.vehicles then dependencies.vehicles else Vehicles.new(world.world:FindFirstChild("Vehicles"), playerStates, canRide, publish,
+		function(player) security:authorizePosition(player, now()) end)
+	playerStates.beforeDown = function(player) vehicles:exit(player) end
 	local function chase(kind, player, destinationId)
 		local destination = world.destinations[destinationId]
 		if destination and player then monsters:start(kind, player, destination.target + Vector3.new(0, 0, -10)) end
@@ -815,14 +916,18 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	end
 	local function add(player: Player)
 		economy:add(player)
+		runners[player] = { value = 5, exhausted = false, wants = false, inputAt = 0 }
+		vehicles:add(player)
 		player:SetAttribute("RoundReward", 0)
+		player:SetAttribute("Stamina", 5)
 		playerStates:add(player)
 		publish()
 	end
 	for _, player in Players:GetPlayers() do add(player) end
 	table.insert(connections, Players.PlayerAdded:Connect(add))
 	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
-		model:remove(player.UserId); security:remove(player); economy:remove(player); playerStates:remove(player)
+		model:remove(player.UserId); security:remove(player); economy:remove(player); vehicles:remove(player); playerStates:remove(player)
+		runners[player] = nil; limiter:remove(player.UserId)
 		holds[player] = nil
 		task.defer(publish)
 	end))
@@ -830,6 +935,16 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		if not security:allowSnapshot(player, now()) then return nil end
 		return snapshot(player)
 	end
+	table.insert(connections, remotes.Action.OnServerEvent:Connect(function(player, payload)
+		if not limiter:allow(player.UserId, now()) or typeof(payload) ~= "table" or payload.roundId ~= model.roundId then return end
+		if payload.kind == "VehicleInput" then vehicles:input(player, payload.throttle, payload.steer)
+		elseif payload.kind == "ResetVehicle" then vehicles:reset(player, true); publish()
+		elseif payload.kind == "ExitVehicle" then vehicles:exit(player); publish()
+		elseif payload.kind == "Sprint" and typeof(payload.enabled) == "boolean" then
+			local runner = runners[player]
+			if runner then runner.wants, runner.inputAt = payload.enabled and playerStates:canAct(player), now() end
+		end
+	end))
 	local function inRange(player: Player, destination: Destination): boolean
 		local char = player.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -846,7 +961,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		table.insert(connections, destination.prompt.Triggered:Connect(function(player)
 			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or now() >= model.endsAt or not playerStates:canAct(player) then return end
 			local timestamp = now()
-			security:sample(player, timestamp)
+			security:sample(player, timestamp, if vehicles:seated(player) then 46 else 28)
 			if not security:canDeliver(player, destination.target, Config.Delivery.Distance, timestamp, Config.Delivery.Cooldown) then return end
 			local hold = holds[player]
 			local heldFor = if hold and hold.index == orders.index and hold.destination == id then timestamp - hold.began else 0
@@ -881,7 +996,19 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		playerStates:tick()
 		monsters:tick()
 		local timestamp, ids = now(), {}
-		for _, player in Players:GetPlayers() do security:sample(player, timestamp); table.insert(ids, player.UserId) end
+		for _, player in Players:GetPlayers() do
+			security:sample(player, timestamp, if vehicles:seated(player) then 46 else 28)
+			local runner = runners[player]
+			local root, humanoid = playerStates:root(player)
+			if runner and root and humanoid then
+				local velocity = root.AssemblyLinearVelocity or Vector3.zero
+				local speed = Movement.stamina(runner, runner.wants and timestamp - runner.inputAt < 0.6,
+					Vector3.new(velocity.X,0,velocity.Z).Magnitude > 1, playerStates:canAct(player) and not vehicles:seated(player), 0.1)
+				if math.abs((player:GetAttribute("Stamina") or 5) - runner.value) > 0.2 then player:SetAttribute("Stamina", runner.value) end
+				if playerStates:canAct(player) then humanoid.WalkSpeed = speed end
+			end
+			table.insert(ids, player.UserId)
+		end
 		for player, hold in holds do
 			local dest = world.destinations[hold.destination]
 			if not orders or hold.index ~= orders.index or not dest or not playerStates:canAct(player) or not inRange(player, dest) then holds[player] = nil end
@@ -923,6 +1050,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	publish()
 	return function()
 		for _, connection in connections do connection:Disconnect() end
+		vehicles:destroy()
 		monsters:destroy()
 		playerStates:destroy()
 		remotes.Snapshot.OnServerInvoke = nil
@@ -933,7 +1061,7 @@ return RoundService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">SecurityService</string>
             <string name="Source"><![CDATA[--!strict
@@ -958,7 +1086,7 @@ function Security.allowSnapshot(self: Service, player: Player, now: number): boo
 	return true
 end
 
-function Security.sample(self: Service, player: Player, now: number)
+function Security.sample(self: Service, player: Player, now: number, allowedSpeed: number?)
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -978,11 +1106,18 @@ function Security.sample(self: Service, player: Player, now: number)
 		self.records[player] = { character = character, position = position, time = now, blockedUntil = now + 2 }
 		return
 	end
-	-- P1은 도보 전용. 차량 도입 시 실제 서버 승인 이동 모드에 맞게 교체해야 한다.
+	-- 허용 속도는 서버가 확인한 좌석 소유/탑승 상태에서만 확장한다.
 	local delta = position - record.position
 	local horizontal = Vector3.new(delta.X, 0, delta.Z).Magnitude
-	if horizontal > 28 * (now - record.time) + 8 then record.blockedUntil = now + 3 end
+	if horizontal > (allowedSpeed or 28) * (now - record.time) + 8 then record.blockedUntil = now + 3 end
 	record.position, record.time = position, now
+end
+
+function Security.authorizePosition(self: Service, player: Player, now: number)
+	self.records[player] = nil
+	self:sample(player, now)
+	local record = self.records[player]
+	if record then record.blockedUntil = now + 0.5 end
 end
 
 function Security.canDeliver(self: Service, player: Player, target: Vector3, maxDistance: number, now: number, cooldown: number): boolean
@@ -1003,12 +1138,195 @@ return Security
 ]]></string>
           </Properties>
         </Item>
+        <Item class="ModuleScript" referent="23">
+          <Properties>
+            <string name="Name">VehicleService</string>
+            <string name="Source"><![CDATA[--!strict
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Config = require(game:GetService("ReplicatedStorage").Shared.Config)
+local Motion = require(script.Parent.MovementModel)
+local Factory = require(script.Parent.Parent.World.VehicleFactory)
+local Service = {}
+Service.__index = Service
+type Actor = { model: Model, seat: VehicleSeat, prompt: ProximityPrompt }
+type Slot = { actor: Actor, owner: Player?, home: CFrame, frame: CFrame, yaw: number, speed: number,
+	throttle: number, steer: number, inputAt: number, riding: boolean }
+type States = { root: (any,Player) -> (BasePart?,Humanoid?), canAct: (any,Player) -> boolean }
+type Store = { slots: { Slot }, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> (),
+	connections: { RBXScriptConnection }, cooldowns: { [Player]: number }, stopped: boolean, elapsed: number }
+export type Runtime = typeof(setmetatable({} :: Store, Service))
+function Service.new(parent: Instance, states: States, canUse: (Player) -> boolean, changed: () -> (), authorizedMove: (Player) -> ()): Runtime
+	local self: Runtime = setmetatable({ slots = {}, states = states, canUse = canUse, changed = changed,
+		authorizedMove = authorizedMove, connections = {}, cooldowns = {}, stopped = false, elapsed = 0 }, Service)
+	for id = 1, 4 do
+		local frame = CFrame.new((id - 2.5) * 12, Config.Map.Spawn.Y + 2, Config.Map.Spawn.Z + 20) * CFrame.Angles(0,math.pi,0)
+		local actor = Factory.create(parent, id, frame)
+		local slot: Slot = { actor = actor, owner = nil, home = frame, frame = frame, yaw = math.pi, speed = 0,
+			throttle = 0, steer = 0, inputAt = 0, riding = false }
+		self.slots[id] = slot
+		table.insert(self.connections, actor.prompt.Triggered:Connect(function(player)
+			local root, humanoid = states:root(player)
+			if slot.owner ~= player or not self.canUse(player) or not states:canAct(player) or not root or not humanoid
+				or humanoid.SeatPart or (root.Position - actor.seat.Position).Magnitude > 8 then return end
+			actor.seat:Sit(humanoid)
+		end))
+		table.insert(self.connections, actor.seat:GetPropertyChangedSignal("Occupant"):Connect(function()
+			local humanoid = actor.seat.Occupant
+			if humanoid then
+				local character = humanoid.Parent
+				local player = if character and character:IsA("Model") then Players:GetPlayerFromCharacter(character) else nil
+				if player ~= slot.owner or not player or not self.canUse(player) or not states:canAct(player) then
+					humanoid.Sit = false
+					return
+				end
+			end
+			slot.riding = humanoid ~= nil
+			slot.throttle, slot.steer, slot.speed = 0, 0, 0
+			self.changed()
+		end))
+	end
+	table.insert(self.connections, RunService.Heartbeat:Connect(function(dt)
+		self.elapsed += dt
+		if self.elapsed < 1/30 then return end
+		local step = math.min(self.elapsed,0.05)
+		self.elapsed = 0
+		self:tick(step)
+	end))
+	return self
+end
+function Service.slot(self: Runtime, player: Player): Slot?
+	for _, slot in self.slots do if slot.owner == player then return slot end end
+	return nil
+end
+function Service.add(self: Runtime, player: Player)
+	if self:slot(player) then return end
+	for _, slot in self.slots do
+		if not slot.owner then
+			slot.owner = player
+			slot.actor.model:SetAttribute("OwnerUserId", player.UserId)
+			slot.actor.prompt.ObjectText = player.DisplayName .. "의 스쿠터"
+			return
+		end
+	end
+end
+function Service.exit(self: Runtime, player: Player)
+	local slot = self:slot(player)
+	if not slot then return end
+	local occupant = slot.actor.seat.Occupant
+	local character = player.Character
+	if occupant and character and occupant.Parent == character then
+		occupant.Sit = false
+		local weld = slot.actor.seat:FindFirstChild("SeatWeld")
+		if weld and weld:IsA("Weld") and ((weld.Part1 and weld.Part1:IsDescendantOf(character)) or (weld.Part0 and weld.Part0:IsDescendantOf(character))) then weld:Destroy() end
+	end
+	slot.speed, slot.throttle, slot.steer, slot.riding = 0, 0, 0, false
+end
+function Service.reset(self: Runtime, player: Player, manual: boolean): boolean
+	local slot = self:slot(player)
+	if not slot then return false end
+	local timestamp = workspace:GetServerTimeNow()
+	if manual and (not self.canUse(player) or not self.states:canAct(player) or timestamp < (self.cooldowns[player] or 0)) then return false end
+	if manual then self.cooldowns[player] = timestamp + Config.Vehicle.ResetCooldown end
+	local wasRiding = slot.riding
+	self:exit(player)
+	-- 소유자의 SeatWeld를 제거한 뒤 복구한다. 서버 내 지연 작업은 소유권/종료 상태를 재검사한다.
+	task.defer(function()
+		if self.stopped or slot.owner ~= player then return end
+		slot.frame, slot.yaw = slot.home, math.pi
+		slot.actor.model:PivotTo(slot.frame)
+		if wasRiding and player.Character then
+			player.Character:PivotTo(slot.home * CFrame.new(5,2,0))
+			self.authorizedMove(player)
+		end
+	end)
+	self.changed()
+	return true
+end
+function Service.remove(self: Runtime, player: Player)
+	local slot = self:slot(player)
+	if slot then
+		self:exit(player)
+		slot.owner = nil
+		slot.actor.model:SetAttribute("OwnerUserId", 0)
+		slot.actor.model:PivotTo(slot.home)
+		slot.frame, slot.yaw = slot.home, math.pi
+	end
+	self.cooldowns[player] = nil
+	for _, waiting in Players:GetPlayers() do if waiting ~= player then self:add(waiting) end end
+end
+function Service.input(self: Runtime, player: Player, throttle: any, steer: any): boolean
+	local slot = self:slot(player)
+	if not slot or not Motion.input(throttle,steer) or not self.canUse(player) or not self.states:canAct(player) then return false end
+	local _, humanoid = self.states:root(player)
+	if not humanoid or not self:seated(player) then return false end
+	slot.throttle, slot.steer, slot.inputAt = throttle, steer, workspace:GetServerTimeNow()
+	return true
+end
+function Service.seated(self: Runtime, player: Player): boolean
+	local slot = self:slot(player)
+	local root, humanoid = self.states:root(player)
+	return slot ~= nil and root ~= nil and humanoid ~= nil and humanoid.Sit and humanoid.SeatPart == slot.actor.seat
+		and slot.actor.seat.Occupant == humanoid and (root.Position - slot.actor.seat.Position).Magnitude <= 12
+end
+function Service.status(self: Runtime, player: Player)
+	local slot = self:slot(player)
+	return { owned = slot ~= nil, seated = self:seated(player), speed = if slot then math.abs(slot.speed) else 0,
+		resetAt = self.cooldowns[player] or 0 }
+end
+function Service.tick(self: Runtime, dt: number)
+	if self.stopped or dt <= 0 then return end
+	for _, slot in self.slots do
+		local player = slot.owner
+		if not player then continue end
+		if not self:seated(player) or not self.canUse(player) or not self.states:canAct(player) then
+			if slot.riding then self:exit(player); self.changed() end
+			slot.throttle, slot.steer = 0, 0
+		end
+		if workspace:GetServerTimeNow() - slot.inputAt > 0.4 then slot.throttle, slot.steer = 0, 0 end
+		slot.speed = Motion.speed(slot.speed, slot.throttle, dt, Config.Vehicle.MaxSpeed)
+		if math.abs((slot.actor.model:GetAttribute("Speed") or 0) - math.abs(slot.speed)) > 0.5 or slot.speed == 0 then slot.actor.model:SetAttribute("Speed", math.abs(slot.speed)) end
+		if math.abs(slot.speed) < 0.05 then continue end
+		local yaw = slot.yaw - slot.steer * 1.6 * dt * math.sign(slot.speed)
+		local frame = CFrame.new(slot.frame.Position) * CFrame.Angles(0,yaw,0)
+		local overlap = OverlapParams.new()
+		overlap.FilterType, overlap.FilterDescendantsInstances, overlap.RespectCanCollide = Enum.RaycastFilterType.Exclude, { slot.actor.model, player.Character }, true
+		if #workspace:GetPartBoundsInBox(frame * CFrame.new(0,0.6,0), Vector3.new(4.5,4.4,7.8), overlap) > 0 then slot.speed = 0; continue end
+		local delta = frame.LookVector * slot.speed * dt
+		local params = RaycastParams.new()
+		params.FilterType, params.FilterDescendantsInstances, params.RespectCanCollide = Enum.RaycastFilterType.Exclude,
+			{ slot.actor.model, player.Character }, true
+		-- 차체 전체를 sweep하여 옆면/앞면 벽 충돌을 검사한다. 서버 CFrame 순간이동으로 벽을 통과하지 않는다.
+		local hit = workspace:Blockcast(frame * CFrame.new(0,0.6,0), Vector3.new(4.5,4.4,7.8), delta, params)
+		if hit then slot.speed = 0; continue end
+		local proposed = frame.Position + delta
+		local ground = workspace:Raycast(proposed + Vector3.new(0,8,0), Vector3.new(0,-35,0), params)
+		if not ground or math.abs(proposed.X) > 310 or math.abs(proposed.Z) > 310 or ground.Position.Y < -10 then
+			self:reset(player, false); continue
+		end
+		slot.yaw, slot.frame = yaw, CFrame.new(proposed.X, ground.Position.Y + 3, proposed.Z) * CFrame.Angles(0,yaw,0)
+		slot.actor.model:PivotTo(slot.frame)
+	end
+end
+function Service.destroy(self: Runtime)
+	self.stopped = true
+	for _, connection in self.connections do connection:Disconnect() end
+	for _, slot in self.slots do
+		if slot.owner then self:exit(slot.owner) end
+		slot.actor.model:Destroy()
+	end
+	table.clear(self.slots)
+end
+return Service
+]]></string>
+          </Properties>
+        </Item>
       </Item>
-      <Item class="Folder" referent="20">
+      <Item class="Folder" referent="24">
         <Properties>
           <string name="Name">World</string>
         </Properties>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">BuildingFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1067,7 +1385,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">MonsterFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1124,7 +1442,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">NavigationSigns</string>
             <string name="Source"><![CDATA[--!strict
@@ -1153,7 +1471,7 @@ return Navigation
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">Primitives</string>
             <string name="Source"><![CDATA[--!strict
@@ -1191,7 +1509,48 @@ return Primitives
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="29">
+          <Properties>
+            <string name="Name">VehicleFactory</string>
+            <string name="Source"><![CDATA[--!strict
+local P = require(script.Parent.Primitives)
+local Factory = {}
+function Factory.create(parent: Instance, id: number, frame: CFrame)
+	local model = Instance.new("Model")
+	model.Name = "Scooter" .. id
+	model:SetAttribute("VehicleId", id)
+	model:SetAttribute("OwnerUserId", 0)
+	local orange = Color3.fromRGB(255, 170, 69)
+	local navy = Color3.fromRGB(27, 39, 64)
+	local seat = Instance.new("VehicleSeat")
+	seat.Name, seat.Size, seat.CFrame = "DriverSeat", Vector3.new(2.2, 0.8, 2.2), frame
+	seat.Anchored, seat.CanTouch, seat.HeadsUpDisplay = true, false, false
+	seat.Color, seat.Parent = navy, model
+	P.part(model, "Body", Vector3.new(3, 1.3, 6), frame * CFrame.new(0,-0.7,0), orange)
+	P.part(model, "Deck", Vector3.new(3.4,0.35,4), frame * CFrame.new(0,-1,-0.5), navy)
+	P.part(model, "Stem", Vector3.new(0.4,2.3,0.4), frame * CFrame.new(0,0.6,-2), navy)
+	P.part(model, "Handlebar", Vector3.new(4.3,0.4,0.4), frame * CFrame.new(0,1.7,-2), navy)
+	for _, z in {-2.5,2.5} do
+		local wheel = P.part(model, "Wheel", Vector3.new(1,2.6,2.6), frame * CFrame.new(0,-1.4,z), Color3.fromRGB(20,23,31))
+		wheel.Shape = Enum.PartType.Cylinder
+	end
+	local lamp = P.part(model, "Headlight", Vector3.new(1.5,1.5,0.7), frame * CFrame.new(0,0.4,-3.1), Color3.fromRGB(255,239,180), Enum.Material.Neon)
+	lamp.Shape = Enum.PartType.Ball
+	P.part(model, "DeliveryBox", Vector3.new(3.5,2.8,2.6), frame * CFrame.new(0,1.1,2.1), navy)
+	P.sign(model, "야식 / " .. id, frame * CFrame.new(0,1.3,3.45) * CFrame.Angles(0,math.pi,0), Vector3.new(3.2,1.5,0.2), orange)
+	local attach = Instance.new("Attachment")
+	attach.Position, attach.Parent = Vector3.new(0,1.5,-1), seat
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText, prompt.ObjectText, prompt.HoldDuration = "스쿠터 탑승", "배달 스쿠터 " .. id, 0.3
+	prompt.MaxActivationDistance, prompt.RequiresLineOfSight, prompt.Parent = 8, true, attach
+	model.PrimaryPart, model.Parent = seat, parent
+	return { model = model, seat = seat, prompt = prompt }
+end
+return Factory
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">WorldBuilder</string>
             <string name="Source"><![CDATA[--!strict
@@ -1305,25 +1664,25 @@ return WorldBuilder
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="26">
+  <Item class="SoundService" referent="31">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="27">
+  <Item class="StarterPlayer" referent="32">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="28">
+    <Item class="StarterPlayerScripts" referent="33">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="29">
+      <Item class="Folder" referent="34">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="30">
+        <Item class="LocalScript" referent="35">
           <Properties>
             <string name="Name">Bootstrap</string>
             <string name="Source"><![CDATA[--!strict
@@ -1340,13 +1699,21 @@ end
 local stateRemote = folder:WaitForChild(Names.State)
 local feedbackRemote = folder:WaitForChild(Names.Feedback)
 local snapshotRemote = folder:WaitForChild(Names.Snapshot)
-local stateConnection = stateRemote.OnClientEvent:Connect(hud.update)
+local controls = require(script.Parent.Controllers.InputController).start(folder:WaitForChild(Names.Action))
+local audio = require(script.Parent.Controllers.AudioController).start()
+local latestVersion = -1
+local function update(snapshot)
+	if not snapshot or snapshot.version < latestVersion then return end
+	latestVersion = snapshot.version
+	hud.update(snapshot); controls.update(snapshot); audio.update(snapshot)
+end
+local stateConnection = stateRemote.OnClientEvent:Connect(update)
 local feedbackConnection = feedbackRemote.OnClientEvent:Connect(hud.feedback)
 -- 이벤트를 먼저 구독하여 초기 스냅샷 도중 발생한 상태 전환을 놓치지 않는다.
 task.spawn(function()
 	for attempt = 1, 3 do
 		local ok, snapshot = pcall(function() return snapshotRemote:InvokeServer() end)
-		if ok and snapshot then hud.update(snapshot); return end
+		if ok and snapshot then update(snapshot); return end
 		task.wait(1.1)
 	end
 	hud.feedback("상태 동기화 실패 · 다시 입장하세요")
@@ -1354,23 +1721,122 @@ end)
 script.Destroying:Connect(function()
 	stateConnection:Disconnect()
 	feedbackConnection:Disconnect()
+	controls.destroy()
+	audio.destroy()
 	hud.destroy()
 	stopSpawn()
 end)
-print("[MidnightDelivery] Client GUI ready (P3)")
+print("[MidnightDelivery] Client GUI ready (P4)")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="31">
+        <Item class="Folder" referent="36">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="32">
+          <Item class="ModuleScript" referent="37">
+            <Properties>
+              <string name="Name">AudioController</string>
+              <string name="Source"><![CDATA[--!strict
+local SoundService = game:GetService("SoundService")
+local Content = game:GetService("ContentProvider")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Catalog = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("AudioCatalog"))
+local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
+local Controller = {}
+function Controller.start()
+	local group = Instance.new("SoundGroup")
+	group.Name, group.Volume, group.Parent = "MidnightAudio", 1, SoundService
+	local sounds, connections = {}, {}
+	local routed = setmetatable({}, {__mode = "k"})
+	local stopped, muted = false, false
+	local previous: Types.Snapshot? = nil
+	for name, definition in Catalog do
+		local sound = Instance.new("Sound")
+		sound.Name, sound.SoundId, sound.Volume, sound.PlaybackSpeed = name, definition.id, definition.volume, definition.pitch
+		sound.Looped, sound.SoundGroup, sound.Parent = name == "Wind" or name == "Motor", group, SoundService
+		sounds[name] = sound
+	end
+	local gui = Instance.new("ScreenGui")
+	gui.Name, gui.ResetOnSpawn, gui.ScreenInsets = "MidnightAudioControls", false, Enum.ScreenInsets.CoreUISafeInsets
+	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local mute = Instance.new("TextButton")
+	mute.Size, mute.Position, mute.Parent = UDim2.fromOffset(100,44), UDim2.new(1,-112,0,136), gui
+	mute.BackgroundColor3, mute.TextColor3, mute.Font, mute.TextSize = Color3.fromRGB(27,39,64), Color3.fromRGB(246,244,235), Enum.Font.GothamMedium, 14
+	mute.Text = "소리 켜짐"
+	local corner = Instance.new("UICorner"); corner.Parent = mute
+	local function route(instance)
+		if instance:IsA("Sound") and not instance.SoundGroup then instance.SoundGroup = group; routed[instance] = true end
+	end
+	for _, instance in workspace:GetDescendants() do route(instance) end
+	table.insert(connections,workspace.DescendantAdded:Connect(route))
+	table.insert(connections,mute.Activated:Connect(function()
+		muted = not muted; group.Volume = if muted then 0 else 1
+		mute.Text = if muted then "소리 꺼짐" else "소리 켜짐"
+	end))
+	local function play(name: string)
+		local sound = sounds[name]
+		if sound then sound.TimePosition = 0; sound:Play() end
+	end
+	task.spawn(function()
+		local list = {}; for _, sound in sounds do table.insert(list,sound) end
+		local ok, err = pcall(function()
+			Content:PreloadAsync(list,function(id,status)
+				if not stopped and status ~= Enum.AssetFetchStatus.Success then warn("[MidnightDelivery] Audio unavailable: " .. id) end
+			end)
+		end)
+		if not stopped then
+			if not ok then warn("[MidnightDelivery] Audio preload failed: " .. tostring(err)) end
+			sounds.Wind:Play()
+		end
+	end)
+	local elapsed, dangerAt = 0, 0
+	table.insert(connections,RunService.RenderStepped:Connect(function(dt)
+		elapsed += dt; if elapsed < 0.1 then return end; elapsed = 0
+		local p = Players.LocalPlayer
+		local humanoid = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+		local seat = humanoid and humanoid.SeatPart
+		local model = seat and seat.Parent
+		local speed = if model then model:GetAttribute("Speed") or 0 else 0
+		if speed > 1 then
+			sounds.Motor.PlaybackSpeed = 0.65 + speed/38*0.9
+			if not sounds.Motor.Playing then sounds.Motor:Play() end
+		elseif sounds.Motor.Playing then sounds.Motor:Stop() end
+		if previous and previous.chase.endsAt > workspace:GetServerTimeNow() and os.clock() > dangerAt then
+			play("Danger"); dangerAt = os.clock()+1.2
+		end
+	end))
+	return {
+		update = function(snapshot: Types.Snapshot)
+			if previous then
+				if snapshot.coins > previous.coins then play("Success")
+				elseif snapshot.downUntil > previous.downUntil and snapshot.downUntil > 0 then play("Down")
+				elseif previous.downUntil > 0 and snapshot.downUntil == 0 then play("Recover")
+				elseif snapshot.orderIndex ~= previous.orderIndex or (snapshot.phase == "PREPARING" and previous.phase ~= snapshot.phase) then play("Receipt") end
+			end
+			previous = snapshot
+		end,
+		destroy = function()
+			stopped = true
+			for _, connection in connections do connection:Disconnect() end
+			for sound in routed do if sound.Parent and sound.SoundGroup == group then sound.SoundGroup = nil end end
+			for _, sound in sounds do sound:Destroy() end
+			group:Destroy(); gui:Destroy()
+		end,
+	}
+end
+return Controller
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="38">
             <Properties>
               <string name="Name">HUDController</string>
               <string name="Source"><![CDATA[--!strict
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local Strings = require(Shared:WaitForChild("Strings"))
 local Types = require(Shared:WaitForChild("Types"))
@@ -1381,7 +1847,7 @@ function HUD.start()
 	local player = Players.LocalPlayer
 	local ui = Factory.create(player:WaitForChild("PlayerGui"))
 	local state: Types.Snapshot? = nil
-	local collapsed, toastUntil = false, 0
+	local collapsed, toastUntil = UIS.TouchEnabled, 0
 	local connections = {}
 	local function render()
 		if not state then return end
@@ -1478,7 +1944,115 @@ return HUD
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="33">
+          <Item class="ModuleScript" referent="39">
+            <Properties>
+              <string name="Name">InputController</string>
+              <string name="Source"><![CDATA[--!strict
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
+local Controller = {}
+function Controller.start(remote: RemoteEvent)
+	local player = Players.LocalPlayer
+	local state: Types.Snapshot? = nil
+	local focused = true
+	local connections, inputs, held = {}, {}, {}
+	local gui = Instance.new("ScreenGui")
+	gui.Name, gui.ResetOnSpawn, gui.ScreenInsets = "MidnightControls", false, Enum.ScreenInsets.CoreUISafeInsets
+	gui.Parent = player:WaitForChild("PlayerGui")
+	local drive = Instance.new("Frame")
+	drive.BackgroundTransparency, drive.Size, drive.AnchorPoint = 1, UDim2.fromOffset(164,104), Vector2.new(0.5,1)
+	drive.Position, drive.Parent = UDim2.new(0.53,0,1,-16), gui
+	local function send(kind: string, extra: { [string]: any }?)
+		if not state then return end
+		local payload = extra or {}
+		payload.kind, payload.roundId = kind, state.roundId
+		remote:FireServer(payload)
+	end
+	local function button(parent: Instance, label: string, position: UDim2, size: UDim2)
+		local b = Instance.new("TextButton")
+		b.Text, b.Position, b.Size, b.Parent = label, position, size, parent
+		b.BackgroundColor3, b.TextColor3, b.TextSize, b.Font = Color3.fromRGB(27,39,64), Color3.fromRGB(246,244,235), 16, Enum.Font.GothamMedium
+		local corner = Instance.new("UICorner"); corner.Parent = b
+		return b
+	end
+	local function holdButton(parent, label, name, position)
+		local b = button(parent,label,position,UDim2.fromOffset(48,48))
+		table.insert(connections,b.InputBegan:Connect(function(input)
+			if input.UserInputType ~= Enum.UserInputType.Touch and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+			inputs[input] = name; held[name] = (held[name] or 0) + 1
+		end))
+		return b
+	end
+	holdButton(drive,"↑", "Forward",UDim2.fromOffset(56,0))
+	holdButton(drive,"←", "Left",UDim2.fromOffset(0,54))
+	holdButton(drive,"↓", "Reverse",UDim2.fromOffset(56,54))
+	holdButton(drive,"→", "Right",UDim2.fromOffset(112,54))
+	local sprint = holdButton(gui,"달리기","Sprint",UDim2.new(1,-82,1,-160))
+	sprint.Size = UDim2.fromOffset(70,48)
+	local leave = button(gui,"하차",UDim2.new(1,-82,1,-160),UDim2.fromOffset(70,48))
+	local reset = button(gui,"차량 복구",UDim2.new(1,-124,0,188),UDim2.fromOffset(112,44))
+	table.insert(connections,leave.Activated:Connect(function() send("ExitVehicle") end))
+	table.insert(connections,reset.Activated:Connect(function() send("ResetVehicle") end))
+	table.insert(connections,UIS.InputEnded:Connect(function(input)
+		local name = inputs[input]
+		if name then held[name] = math.max(0,(held[name] or 0)-1); inputs[input] = nil end
+	end))
+	table.insert(connections,UIS.WindowFocusReleased:Connect(function()
+		focused = false; table.clear(held); table.clear(inputs)
+		send("Sprint",{enabled=false}); send("VehicleInput",{throttle=0,steer=0})
+	end))
+	table.insert(connections,UIS.WindowFocused:Connect(function() focused = true end))
+	table.insert(connections,UIS.InputBegan:Connect(function(input, processed)
+		if not processed and input.KeyCode == Enum.KeyCode.Space then send("ExitVehicle") end
+	end))
+	local elapsed, sprintElapsed = 0, 0
+	table.insert(connections,RunService.RenderStepped:Connect(function(dt)
+		elapsed += dt; sprintElapsed += dt
+		if elapsed < 0.1 then return end
+		elapsed = 0
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local seat = humanoid and humanoid.SeatPart
+		local riding = seat ~= nil and seat:IsA("VehicleSeat")
+		local down = state and state.downUntil > workspace:GetServerTimeNow()
+		drive.Visible = UIS.TouchEnabled and riding and not down
+		leave.Visible, sprint.Visible = riding and not down, not riding and not down
+		reset.Visible = state ~= nil and state.vehicle.owned and (state.phase == "WAITING" or state.participant) and not down
+		if state then
+			local cooldown = math.max(0,math.ceil(state.vehicle.resetAt-workspace:GetServerTimeNow()))
+			reset.Text = if cooldown > 0 then "복구 " .. cooldown .. "초" else "차량 복구"
+		end
+		sprint.Text = string.format("달리기\n%d%%",math.floor((player:GetAttribute("Stamina") or 5)*20))
+		local function pressed(name) return (held[name] or 0) > 0 end
+		local typing = UIS:GetFocusedTextBox() ~= nil
+		if sprintElapsed >= 0.3 then
+			sprintElapsed = 0
+			send("Sprint",{enabled=focused and not typing and not riding and not down and (pressed("Sprint") or UIS:IsKeyDown(Enum.KeyCode.LeftShift))})
+		end
+		if riding and seat and seat:IsA("VehicleSeat") then
+			local throttle = if focused and not typing then seat.ThrottleFloat else 0
+			local steer = if focused and not typing then seat.SteerFloat else 0
+			if focused and not typing then
+				if pressed("Forward") or UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.Up) then throttle = 1 end
+				if pressed("Reverse") or UIS:IsKeyDown(Enum.KeyCode.S) or UIS:IsKeyDown(Enum.KeyCode.Down) then throttle = -1 end
+				if pressed("Left") or UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.Left) then steer = -1 end
+				if pressed("Right") or UIS:IsKeyDown(Enum.KeyCode.D) or UIS:IsKeyDown(Enum.KeyCode.Right) then steer = 1 end
+			end
+			send("VehicleInput",{throttle=throttle,steer=steer})
+		end
+	end))
+	return {
+		update = function(snapshot: Types.Snapshot) state = snapshot end,
+		destroy = function() for _, connection in connections do connection:Disconnect() end; gui:Destroy() end,
+	}
+end
+return Controller
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="40">
             <Properties>
               <string name="Name">SpawnController</string>
               <string name="Source"><![CDATA[--!strict
@@ -1515,11 +2089,11 @@ return Controller
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="34">
+        <Item class="Folder" referent="41">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="35">
+          <Item class="ModuleScript" referent="42">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--!strict
@@ -1531,7 +2105,7 @@ return table.freeze({
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="36">
+          <Item class="ModuleScript" referent="43">
             <Properties>
               <string name="Name">UIFactory</string>
               <string name="Source"><![CDATA[--!strict
@@ -1606,7 +2180,7 @@ return Factory
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="37">
+  <Item class="Workspace" referent="44">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

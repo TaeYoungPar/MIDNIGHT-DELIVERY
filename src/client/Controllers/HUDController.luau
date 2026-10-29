@@ -1,6 +1,7 @@
 --!strict
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local Strings = require(Shared:WaitForChild("Strings"))
 local Types = require(Shared:WaitForChild("Types"))
@@ -11,7 +12,7 @@ function HUD.start()
 	local player = Players.LocalPlayer
 	local ui = Factory.create(player:WaitForChild("PlayerGui"))
 	local state: Types.Snapshot? = nil
-	local collapsed, toastUntil = false, 0
+	local collapsed, toastUntil = UIS.TouchEnabled, 0
 	local connections = {}
 	local function render()
 		if not state then return end

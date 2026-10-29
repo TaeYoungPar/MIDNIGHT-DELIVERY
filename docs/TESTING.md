@@ -1,6 +1,6 @@
 # 검증 기록과 Studio 절차
 
-현재 빌드는 P3입니다. 최신 검사와 수동 절차는 맨 아래 **P3 추격/기절/구조 및 초기 방향** 절을 기준으로 합니다. 앞부분은 P1/P2 당시 기록입니다.
+현재 빌드는 P4입니다. 최신 검사와 수동 절차는 맨 아래 **P4 스쿠터/모바일/스프린트/사운드** 절을 기준으로 합니다. 앞부분은 P1~P3 당시 기록입니다.
 
 2026-10-28. 자동 검사 결과와 엔진 실행 결과를 구분합니다.
 
@@ -92,3 +92,35 @@ Lune는 Roblox Studio가 아닙니다. World 검사는 Instance 속성 데이터
 8. 모바일 에뮬레이터와 실기기의 카메라/프롬프트/기절/구조 버튼, 긴 팀원 이름 표시를 확인.
 
 검증 자료로 Studio 버전, 인원, 라운드/주문, 재현 단계, Output 오류, 필요 시 영상/화면을 남깁니다. 이 항목은 headless PASS로 체크하지 않습니다.
+
+## 2026-10-29 — P4 스쿠터/모바일/스프린트/사운드
+
+최신 검증/재현 절차는 이 절을 기준으로 합니다. 앞부분의 P1~P3 기록은 당시 상태입니다.
+
+- `tests/vehicles.luau`: **10개 PASS**. 실제 MovementModel/ActionLimiter/VehicleService 실행, 좌석/캐스트/물리는 대역. 스태미나 소진/재충전, NaN/Infinity/잘못된 입력 거부, 속도·후진·제동, 토큰 버킷, 스쿠터 4대/소유권, 입력 timeout, 회전 overlap/벽 sweep, 복구/쿨다운/하차, 지면 없음/이탈, 취소된 지연 작업 검사.
+- `tests/recovery.luau`: 외곽/낙하 복귀 1개 추가로 **8개 PASS**. 전체 번호 있는 로직/대역 테스트 합계 **47개 PASS**.
+- `tests/audio.luau`: 실제 AudioController의 접수/성공/추격/기절/복귀, 바람/주행 루프, 음소거/해제, 기본 캐릭터 사운드 그룹 연결/해제, 종료 정리 mock 검사 PASS. **청취 검사가 아님**.
+- RoundService 통합 mock: VehicleInput의 이전 roundId 거부/정상 dispatch, GiveCoins 같은 허용되지 않은 액션 무시 PASS.
+- Lune metadata: VehicleFactory로 4대 생성, anchored VehicleSeat/차체/개별 프롬프트/소유자 Attribute PASS. 실제 탑승·이동 검사가 아님.
+- 컴파일/엔진 비의존 핵심 타입/Rojo 32개 소스 패키징 검사 PASS. 직접 rbxlx 배포 파일과 빌드 원본 바이트 일치 PASS.
+
+### P4 Studio 게이트 — 모두 NOT TESTED
+
+1. 최신 rbxlx 파일을 새로 열어 F5. 본부 앞 스쿠터 4대와 자신의 이름을 확인하고 E/터치로 자기 차량만 탑승. 다른 사람 차량 탑승/조작은 거절되어야 합니다.
+2. PC W/S/A/D·방향키로 전진/후진/회전, 스페이스/하차 버튼으로 하차. 모델만 움직이고 캐릭터가 남거나, 하차 후 캐릭터가 고정되면 FAIL.
+3. 모바일 에뮬레이터/실기기에서 ↑/↓/←/→ 버튼을 길게 누르며 운전. 손가락을 버튼 밖에서 떼거나 앱 포커스를 잃으면 입력이 남지 않아야 합니다. 기본 조이스틱/점프/문 프롬프트와 겹침 확인.
+4. 벽 정면/옆면/회전 중, 다른 차량/플레이어 근처, 현관 계단/도로 가장자리에서 관통 없이 정지하는지 확인. 끼면 차량 복구 → 본부 안전 하차, 15초 연타 거부.
+5. 추격 중 차량 탑승/기절, 탑승 중 리스폰/이탈, 차량 입력 통신 중단, 2·4인 동시 운전과 네트워크 지연을 검사합니다. 잘못된 좌석 소유/하차/카메라 이동이 없어야 합니다.
+6. 도보 Shift/달리기 버튼 5초, 소진 후 5초 충전, 서 있을 때 소진되지 않음. 기절/탑승 중 스프린트 효과 금지. 외곽/낙하 시 본부 복귀 후 정상 이동 확인.
+7. 기본 음색 접수/성공/위험/기절/복귀와 주행/바람 루프를 실제로 들어봅니다. 소리 버튼을 켜고 끄며 기본 발소리도 음소거되는지 확인. 다른 클라이언트 설정에는 영향이 없어야 합니다. Preload 경고 시 해당 경로/클라이언트 버전 기록.
+8. 음소거 상태에서도 모든 규칙/실패/추격/복구를 HUD만 보고 이해할 수 있는지 검사. 16:9/19.5:9/세로 화면 버튼과 텍스트 검사.
+9. 실제 모바일/4인에서 FPS와 서버 캐스트·복제 비용을 측정하고, 스쿠터로 목적지 25~60초 동선 실측. P3 미검증 항목도 함께 확인.
+
+### 공식 API/기본 음원 경로 참고
+
+- https://create.roblox.com/docs/reference/engine/classes/WorldRoot#Blockcast
+- https://create.roblox.com/docs/reference/engine/classes/VehicleSeat
+- https://create.roblox.com/docs/reference/engine/classes/Sound
+- https://github.com/Roblox/Core-Scripts/blob/master/PlayerScripts/StarterCharacterScripts/Sound.server.lua
+
+공식 문서로 API와 기본 경로를 대조했으며, 그것이 현재 엔진에서의 주행/실제 소리 재생 성공을 입증하지는 않습니다.
