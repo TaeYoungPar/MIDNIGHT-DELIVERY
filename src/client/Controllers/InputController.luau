@@ -4,7 +4,7 @@ local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
 local Controller = {}
-function Controller.start(remote: RemoteEvent)
+function Controller.start(remote: RemoteEvent,settings)
 	local player = Players.LocalPlayer
 	local state: Types.Snapshot? = nil
 	local focused = true
@@ -44,6 +44,7 @@ function Controller.start(remote: RemoteEvent)
 	sprint.Size = UDim2.fromOffset(70,48)
 	local leave = button(gui,"하차",UDim2.new(1,-82,1,-160),UDim2.fromOffset(70,48))
 	local reset = button(gui,"차량 복구",UDim2.new(1,-124,0,188),UDim2.fromOffset(112,44))
+	if settings then settings.register(reset)end
 	table.insert(connections,leave.Activated:Connect(function() send("ExitVehicle") end))
 	table.insert(connections,reset.Activated:Connect(function() send("ResetVehicle") end))
 	table.insert(connections,UIS.InputEnded:Connect(function(input)
@@ -77,7 +78,7 @@ function Controller.start(remote: RemoteEvent)
 		end
 		sprint.Text = string.format("달리기\n%d%%",math.floor((player:GetAttribute("Stamina") or 5)*20))
 		local function pressed(name) return (held[name] or 0) > 0 end
-		local typing = UIS:GetFocusedTextBox() ~= nil
+		local typing = UIS:GetFocusedTextBox() ~= nil or (settings and settings.get().menuOpen==true)
 		if sprintElapsed >= 0.3 then
 			sprintElapsed = 0
 			send("Sprint",{enabled=focused and not typing and not riding and not down and (pressed("Sprint") or UIS:IsKeyDown(Enum.KeyCode.LeftShift))})
@@ -96,7 +97,7 @@ function Controller.start(remote: RemoteEvent)
 	end))
 	return {
 		update = function(snapshot: Types.Snapshot) state = snapshot end,
-		destroy = function() for _, connection in connections do connection:Disconnect() end; gui:Destroy() end,
+		destroy = function() for _, connection in connections do connection:Disconnect() end; reset:Destroy(); gui:Destroy() end,
 	}
 end
 return Controller

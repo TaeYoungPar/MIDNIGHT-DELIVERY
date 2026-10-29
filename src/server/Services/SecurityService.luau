@@ -1,7 +1,7 @@
 --!strict
 local Security = {}
 Security.__index = Security
-type Record = { character: Model, position: Vector3, time: number, blockedUntil: number }
+type Record = { character: Model, position: Vector3, time: number, blockedUntil: number, credit: number }
 type State = { records: { [Player]: Record }, requests: { [Player]: number }, interactions: { [Player]: number } }
 type Service = typeof(setmetatable({} :: State, Security))
 
@@ -37,13 +37,18 @@ function Security.sample(self: Service, player: Player, now: number, allowedSpee
 	end
 	local record = self.records[player]
 	if not record or record.character ~= character then
-		self.records[player] = { character = character, position = position, time = now, blockedUntil = now + 2 }
+		self.records[player] = { character = character, position = position, time = now, blockedUntil = now + 2, credit = 12 }
 		return
 	end
 	-- 허용 속도는 서버가 확인한 좌석 소유/탑승 상태에서만 확장한다.
 	local delta = position - record.position
 	local horizontal = Vector3.new(delta.X, 0, delta.Z).Magnitude
-	if horizontal > (allowedSpeed or 28) * (now - record.time) + 8 then record.blockedUntil = now + 3 end
+	local speed=allowedSpeed or 28
+	local available=record.credit+speed*math.max(0,now-record.time)
+	if horizontal>available then
+		record.blockedUntil=now+math.max(3,horizontal/speed)
+		record.credit=0
+	else record.credit=math.min(12,available-horizontal)end
 	record.position, record.time = position, now
 end
 

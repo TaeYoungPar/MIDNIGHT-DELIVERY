@@ -1,6 +1,7 @@
 --!strict
 export type Phase = "WAITING" | "PREPARING" | "PLAYING" | "RESULTS"
 export type Snapshot = {
+	preferences: { muted: boolean, reducedMotion: boolean, largeText: boolean, hudMode: string }, tutorialSeen: boolean,
 	level: number, data: { mode: string, reason: string, dirty: boolean }, owned: { [string]: boolean }, equipped: { [string]: string },
 	vehicle: { owned: boolean, seated: boolean, speed: number, resetAt: number }, stamina: number,
 	downUntil: number, protectedUntil: number, members: { { name: string, downUntil: number } },

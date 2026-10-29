@@ -2,6 +2,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
+local TweenService=game:GetService("TweenService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local Strings = require(Shared:WaitForChild("Strings"))
 local Types = require(Shared:WaitForChild("Types"))
@@ -14,6 +15,11 @@ function HUD.start()
 	local state: Types.Snapshot? = nil
 	local collapsed, toastUntil = UIS.TouchEnabled, 0
 	local connections = {}
+	local options={reducedMotion=false,largeText=false}
+	local previousMode,previousCompact=nil,nil
+	local tween=nil
+	local fontSizes={}
+	for _,item in ui.gui:GetDescendants()do if item:IsA("TextLabel")or item:IsA("TextButton")then fontSizes[item]=item.TextSize end end
 	local function render()
 		if not state then return end
 		ui.phase.Text = Strings[state.phase] or state.phase
@@ -34,9 +40,9 @@ function HUD.start()
 			ui.title.Text, ui.hint.Text = Strings.Title, "자동으로 시작합니다.\n주문 확인 → 네온 길 따라 이동 → 현관 배달"
 		end
 		ui.hint.Visible = not collapsed
-		ui.card.Size = UDim2.fromOffset(math.min(300, math.max(190, ui.root.AbsoluteSize.X - 140)), if collapsed then 42 else 142)
-		ui.stats.Position = UDim2.fromOffset(16, if collapsed then 134 else 234)
-		ui.note.Position = UDim2.fromOffset(16, if collapsed then 182 else 282)
+		ui.card.Size = UDim2.fromOffset(math.min(300, math.max(190, ui.root.AbsoluteSize.X - 140)), if collapsed then 42 else (if options.largeText then 164 else 142))
+		ui.stats.Position = UDim2.fromOffset(16, if collapsed then 134 else (if options.largeText then 256 else 234))
+		ui.note.Position = UDim2.fromOffset(16, if collapsed then 182 else (if options.largeText then 304 else 282))
 		ui.toggle.Text = if collapsed then "주문 펼치기" else "주문 접기"
 	end
 	table.insert(connections, ui.toggle.Activated:Connect(function() collapsed = not collapsed; render() end))
@@ -56,8 +62,18 @@ function HUD.start()
 			ui.recovery.Text = if state.chase.targetId == player.UserId then "괴물이 쫓아옵니다! 도로를 따라 도망치세요" else "팀원이 추격당하고 있습니다!"
 		else ui.recovery.Text = "" end
 		local members = {}
-		for _, member in state.members do table.insert(members, member.name .. (if member.downUntil > now then " · 구조 필요" else " · 정상")) end
+		for _, member in state.members do
+			local cut=utf8.offset(member.name,11)
+			local name=if cut then string.sub(member.name,1,cut-1).."…"else member.name
+			table.insert(members, name .. (if member.downUntil > now then " · 구조 필요" else " · 정상"))
+		end
 		ui.team.Text = table.concat(members, "  /  ")
+		local compactTeam=UIS.TouchEnabled or ui.root.AbsoluteSize.Y<500
+		ui.team.Visible=not compactTeam
+		if compactTeam then
+			local down=0;for _,member in state.members do if member.downUntil>now then down+=1 end end
+			ui.stats.Text=string.format("Lv.%d · %d Coins\n참가 %d명 · 구조 필요 %d명",state.level,state.coins,#state.members,down)
+		end
 		if state.phase == "PLAYING" and state.participant then
 			local detail = state.orderHint
 			if state.stage == "HOLDING" then detail = string.format("문을 향한 채 그대로! %d초", math.max(0, math.ceil(state.holdUntil - now)))
@@ -95,16 +111,30 @@ function HUD.start()
 	end))
 	ui.arrow.Visible, ui.distance.Visible = false, false
 	return {
+		configure=function(value)
+			options=value
+			if value.hudMode~=previousMode or value.compactHUD~=previousCompact then collapsed=value.compactHUD end
+			previousMode,previousCompact=value.hudMode,value.compactHUD
+			for item,size in fontSizes do item.TextSize=math.floor(size*(if value.largeText then 1.15 else 1)+0.5)end
+			if value.reducedMotion and tween then tween:Cancel();tween=nil;ui.toast.TextTransparency=0 end
+			render()
+		end,
 		update = function(snapshot: Types.Snapshot?)
 			if not snapshot or (state and snapshot.version < state.version) then return end
 			state = snapshot
 			render()
 		end,
 		feedback = function(message: string)
+			if tween then tween:Cancel();tween=nil end
 			ui.toast.Text, toastUntil = message, workspace:GetServerTimeNow() + 4
+			ui.toast.TextTransparency=if options.reducedMotion then 0 else 1
+			if not options.reducedMotion then
+				tween=TweenService:Create(ui.toast,TweenInfo.new(0.2,Enum.EasingStyle.Quad),{TextTransparency=0});tween:Play()
+			end
 		end,
 		destroy = function()
 			for _, connection in connections do connection:Disconnect() end
+			if tween then tween:Cancel()end
 			ui.gui:Destroy()
 		end,
 	}

@@ -4,18 +4,27 @@ local Model = {}
 local MAX = 1000000000
 local thresholds = { 0, 100, 250, 450, 700, 1000, 1400, 1900, 2500, 3200 }
 export type Profile = { schemaVersion: number, coins: number, xp: number, lifetimeDeliveries: number,
-	owned: { [string]: boolean }, equipped: { [string]: string } }
+	owned: { [string]: boolean }, equipped: { [string]: string },
+	preferences: { muted: boolean, reducedMotion: boolean, largeText: boolean, hudMode: string }, tutorialSeen: boolean }
 export type Row = { schemaVersion: number, profile: Profile, revision: number, updatedAt: number,
 	lease: { token: string, expiresAt: number }? }
+function Model.defaultPreferences()
+	return {muted=false,reducedMotion=false,largeText=false,hudMode="auto"}
+end
+function Model.preference(key: any, value: any): boolean
+	if key=="hudMode" then return value=="auto" or value=="compact" or value=="expanded" end
+	return (key=="muted" or key=="reducedMotion" or key=="largeText") and typeof(value)=="boolean"
+end
 function Model.default(): Profile
-	return { schemaVersion = 1, coins = 0, xp = 0, lifetimeDeliveries = 0, owned = {}, equipped = {hat="",scooter="",badge=""} }
+	return { schemaVersion = 2, coins = 0, xp = 0, lifetimeDeliveries = 0, owned = {}, equipped = {hat="",scooter="",badge=""}, preferences=Model.defaultPreferences(), tutorialSeen=false }
 end
 function Model.integer(value: any, maximum: number?): boolean
 	return typeof(value) == "number" and value == value and value >= 0 and value <= (maximum or MAX) and value % 1 == 0
 end
 function Model.copy(profile: Profile): Profile
-	return { schemaVersion = 1, coins = profile.coins, xp = profile.xp, lifetimeDeliveries = profile.lifetimeDeliveries,
-		owned = table.clone(profile.owned), equipped = table.clone(profile.equipped) }
+	return { schemaVersion = 2, coins = profile.coins, xp = profile.xp, lifetimeDeliveries = profile.lifetimeDeliveries,
+		owned = table.clone(profile.owned), equipped = table.clone(profile.equipped),
+		preferences=table.clone(profile.preferences),tutorialSeen=profile.tutorialSeen }
 end
 function Model.level(xp: number): number
 	local level = 1
@@ -23,12 +32,12 @@ function Model.level(xp: number): number
 	return level
 end
 function Model.decode(raw: any): (Row?, string?)
-	if raw == nil then return {schemaVersion=1,profile=Model.default(),revision=0,updatedAt=0}, nil end
-	if typeof(raw) ~= "table" or raw.schemaVersion ~= 1 then return nil,"unsupported_schema" end
+	if raw == nil then return {schemaVersion=2,profile=Model.default(),revision=0,updatedAt=0}, nil end
+	if typeof(raw) ~= "table" or (raw.schemaVersion ~= 1 and raw.schemaVersion ~= 2) then return nil,"unsupported_schema" end
 	local source = if raw.profile ~= nil then raw.profile else raw
 	if typeof(source) ~= "table" or not Model.integer(source.coins) or not Model.integer(source.xp)
 		or not Model.integer(if source.lifetimeDeliveries ~= nil then source.lifetimeDeliveries else 0) then return nil,"invalid_currency" end
-	if source.schemaVersion ~= nil and source.schemaVersion ~= 1 then return nil,"unsupported_schema" end
+	if source.schemaVersion ~= nil and source.schemaVersion ~= 1 and source.schemaVersion ~= 2 then return nil,"unsupported_schema" end
 	local profile = Model.default()
 	profile.coins, profile.xp, profile.lifetimeDeliveries = source.coins, source.xp, if source.lifetimeDeliveries ~= nil then source.lifetimeDeliveries else 0
 	local owned = if source.owned ~= nil then source.owned elseif source.ownedCosmetics ~= nil then source.ownedCosmetics else {}
@@ -47,13 +56,28 @@ function Model.decode(raw: any): (Row?, string?)
 		if typeof(id) ~= "string" or (#id > 0 and not profile.owned[id]) then return nil,"unowned_equipped" end
 		profile.equipped[slot] = id
 	end
+	if source.preferences ~= nil then
+		if typeof(source.preferences)~="table" then return nil,"invalid_preferences" end
+		local prefs=source.preferences
+		for _,key in {"muted","reducedMotion","largeText","hudMode"}do
+			if prefs[key]~=nil and not Model.preference(key,prefs[key])then return nil,"invalid_preference"end
+		end
+		profile.preferences.muted=if prefs.muted~=nil then prefs.muted else false
+		profile.preferences.reducedMotion=if prefs.reducedMotion~=nil then prefs.reducedMotion else false
+		profile.preferences.largeText=if prefs.largeText~=nil then prefs.largeText else false
+		profile.preferences.hudMode=prefs.hudMode or "auto"
+	end
+	if source.tutorialSeen~=nil then
+		if typeof(source.tutorialSeen)~="boolean" then return nil,"invalid_tutorial_flag" end
+		profile.tutorialSeen=source.tutorialSeen
+	end
 	-- 최초 기획의 기본 스킨은 별도 파트가 없는 기본 외형으로 이행한다.
 	local revision = raw.revision or 0
 	if not Model.integer(revision) then return nil,"invalid_revision" end
 	local lease = raw.lease
 	if lease ~= nil and (typeof(lease) ~= "table" or typeof(lease.token) ~= "string" or #lease.token < 1 or #lease.token > 200
 		or not Model.integer(lease.expiresAt,1000000000000)) then return nil,"invalid_lease" end
-	return {schemaVersion=1,profile=profile,revision=revision,updatedAt=raw.updatedAt or 0,
+	return {schemaVersion=2,profile=profile,revision=revision,updatedAt=raw.updatedAt or 0,
 		lease=if lease then {token=lease.token,expiresAt=lease.expiresAt} else nil},nil
 end
 function Model.acquire(raw: any, token: string, now: number, ttl: number): (Row?, string?)

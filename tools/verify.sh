@@ -14,6 +14,8 @@ lune run tests/vehicles.luau
 lune run tests/profiles.luau
 lune run tests/data_service.luau
 lune run tests/audio.luau
+lune run tests/settings_ui.luau
+lune run tests/hud.luau
 lune run tests/round_integration.luau
 lune run tests/world.luau
 mkdir -p build

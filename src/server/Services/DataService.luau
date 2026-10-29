@@ -73,6 +73,18 @@ function Service:touch(player)
 	if h.mode=="READY" or h.mode=="SAVE_ERROR" then h.dirty=true end
 	self:sync(player,h)
 end
+function Service:preference(player,key,value): boolean
+	if not self:canEarn(player) then return false end
+	local profile=self:profile(player)
+	if not profile then return false end
+	if key=="tutorialSeen" then
+		if value~=true then return false end
+		profile.tutorialSeen=true
+	elseif Model.preference(key,value) then profile.preferences[key]=value
+	else return false end
+	self:touch(player);self:queueSave(player)
+	return true
+end
 function Service:queueSave(player)
 	local h=self.handles[player]
 	if h then h.nextSave=math.min(h.nextSave or math.huge,os.clock()+5) end

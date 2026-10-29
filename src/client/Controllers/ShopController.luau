@@ -4,7 +4,7 @@ local Shared=game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local Catalog=require(Shared:WaitForChild("Catalogs"))
 local Types=require(Shared:WaitForChild("Types"))
 local Controller={}
-function Controller.start(remote: RemoteEvent)
+function Controller.start(remote: RemoteEvent,settings)
 	local state: Types.Snapshot?=nil
 	local connections,rows={},{}
 	local gui=Instance.new("ScreenGui")
@@ -25,6 +25,7 @@ function Controller.start(remote: RemoteEvent)
 		return b
 	end
 	local open=button(gui,"꾸미기 상점",UDim2.new(1,-124,0,240),UDim2.fromOffset(112,44))
+	if settings then settings.register(open)end
 	local overlay=Instance.new("Frame")
 	overlay.Size,overlay.BackgroundColor3,overlay.BackgroundTransparency,overlay.Visible,overlay.Parent=UDim2.fromScale(1,1),Color3.fromRGB(5,8,18),0.2,false,gui
 	overlay.Active=true
@@ -75,7 +76,7 @@ function Controller.start(remote: RemoteEvent)
 					elseif snapshot.coins<item.price then item.price.." Coins\n잔액 부족" else item.price.." Coins"
 			end
 		end,
-		destroy=function()for _,connection in connections do connection:Disconnect()end;gui:Destroy()end,
+		destroy=function()for _,connection in connections do connection:Disconnect()end;open:Destroy();gui:Destroy()end,
 	}
 end
 return Controller

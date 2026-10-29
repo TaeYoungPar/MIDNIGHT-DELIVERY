@@ -1,6 +1,6 @@
 # 검증 기록과 Studio 절차
 
-현재 빌드는 P5입니다. 최신 검사 기록은 맨 아래 P5 절입니다. 사용자 수동 확인은 별도 **[USER_VERIFICATION.md](USER_VERIFICATION.md)**에 모았습니다. 앞부분은 이전 단계 당시 기록입니다.
+현재 빌드는 P6입니다. 최신 검사 기록은 맨 아래 P6 절입니다. 사용자 수동 확인은 별도 **[USER_VERIFICATION.md](USER_VERIFICATION.md)**에 모았습니다. 앞부분은 이전 단계 당시 기록입니다.
 
 2026-10-28. 자동 검사 결과와 엔진 실행 결과를 구분합니다.
 
@@ -144,3 +144,16 @@ Lune는 Roblox Studio가 아닙니다. World 검사는 Instance 속성 데이터
 - https://create.roblox.com/docs/cloud-services/data-stores
 
 UpdateAsync 콜백은 재호출 가능/return nil 취소/내부 yield 금지 조건을 따릅니다. 실제 서비스 승인·저장 성공은 위 문서를 읽거나 어댑터 테스트를 통과한 것만으로 확인되지 않습니다.
+
+
+## 2026-10-29 — P6 설정/안내/마감 및 반복 회귀
+
+- 번호 있는 로직/대역 테스트 **71개 PASS**. 이동 예산 1개, 설정 기본값/스키마 v1→v2/저장 복원 2개, 세션 설정 검증 1개 추가.
+- `tests/settings_ui.luau`: 실제 Settings/Tutorial 컨트롤러를 GUI 대역으로 실행. 로딩 전 변경 대기·서버 동기화·기기 자동/펼침·구독 해제·안내 완료/다시 보기·44px 메뉴 PASS.
+- `tests/hud.luau`: 실제 HUD + GUI/타이머/Tween 대역. 카드/큰 글자/UTF-8 닉네임/시간/알림 애니메이션 줄이기/연결 정리 PASS.
+- 오디오 대역 검사에 설정 로드 전 조용한 대기/저장 음소거/메뉴 토글/구독 정리 추가 PASS. 실제 청취는 미검증.
+- RoundService mock에서 **20개 가속 타임아웃 라운드**를 연속 실행. 매번 결과/다음 판, 정리 후 Heartbeat/입장·퇴장/프롬프트/Action 연결 0 확인 PASS. 실제 20판/메모리 측정은 아님.
+- 월드 metadata: 359개 descendants, 목적지 5곳 각각 양옆 통로 2개/가로 연결 2개, 본부 안내 인물/편의점 생성 PASS. 실제 경로/미관/동선 시간은 미검증.
+- Luau 컴파일/핵심 순수 모델 타입/Rojo **43개 소스** 포함·일치 PASS. 직접 rbxlx 배포 유지.
+
+실제 검증은 `docs/USER_VERIFICATION.md`, 남은 출시 게이트는 `docs/RELEASE_READINESS.md`. 원본 QA 체크리스트는 이 대역 검사만으로 완료 표시하지 않습니다.

@@ -58,6 +58,11 @@ for _, destination in first.destinations do
 	assert(not destination.prompt.Enabled)
 end
 assert(promptCount == 5, "Ghost, giant, and three fake houses must have independent prompts")
+for id in first.destinations do
+	local paths=first.world.Roads:FindFirstChild(id.."_Paths")
+	assert(paths and #paths:GetChildren()==4,"Each destination needs both side paths and cross connections")
+end
+assert(first.world.Buildings:FindFirstChild("convenience_store")and first.world.Lobby.HeadquartersDetails:FindFirstChild("ShopGuide"))
 local count = #first.world:GetDescendants()
 for _, instance in first.world:GetDescendants() do
 	if instance:IsA("BasePart") then assert(instance.Anchored, instance.Name) end

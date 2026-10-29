@@ -40,7 +40,7 @@ test("fresh profile and current Unix lease roundtrip validate",function()
 	local row=Model.decode(f.b.rows.User_1);assert(row and row.profile.coins==240 and row.lease.expiresAt>1700000000)
 end)
 test("invalid currency, future schema, malformed inventory and unowned equip fail closed",function()
-	for _,raw in {{schemaVersion=2},{schemaVersion=1,coins=0/0,xp=0},{schemaVersion=1,coins=-1,xp=0},
+	for _,raw in {{schemaVersion=99},{schemaVersion=1,coins=0/0,xp=0},{schemaVersion=1,coins=-1,xp=0},
 		{schemaVersion=1,coins=0,xp=0,owned=false},{schemaVersion=1,coins=0,xp=0,equipped={hat="neon_cap"}},
 		{schemaVersion=1,coins=math.huge,xp=0}} do assert(Model.decode(raw)==nil)end
 end)
@@ -131,5 +131,18 @@ test("shop service locks session mode and rejects invalid payloads",function()
 	clock=1;assert(not shop:action(player,"PurchaseWithCoins","neon_cap",nil));assert(profile.coins==380)
 	clock=2;assert(shop:action(player,"EquipCosmetic","neon_cap",true));assert(profile.equipped.hat=="neon_cap")
 	clock=3;assert(shop:action(player,"EquipCosmetic","neon_cap",false));assert(profile.equipped.hat=="")
+end)
+test("pre-P6 profiles gain safe defaults and invalid preferences are rejected",function()
+	local row=Model.decode({schemaVersion=1,coins=80,xp=20})
+	assert(row and row.schemaVersion==2 and row.profile.schemaVersion==2 and row.profile.preferences.hudMode=="auto" and not row.profile.tutorialSeen)
+	assert(Model.preference("muted",true) and Model.preference("hudMode","compact"))
+	assert(not Model.preference("coins",100) and not Model.preference("muted","yes") and not Model.preference("hudMode","broken"))
+	assert(Model.decode({schemaVersion=1,coins=0,xp=0,preferences={muted="yes"}})==nil)
+end)
+test("preferences and tutorial completion survive profile save and restore",function()
+	local f=context();local h=f.a:load(1)
+	h.profile.preferences.muted=true;h.profile.preferences.largeText=true;h.profile.preferences.hudMode="compact";h.profile.tutorialSeen=true;h.version+=1
+	assert(f.a:save(1,h,true));local restored=f.other:load(1)
+	assert(restored.profile.preferences.muted and restored.profile.preferences.largeText and restored.profile.preferences.hudMode=="compact" and restored.profile.tutorialSeen)
 end)
 print(string.format("%d P5 profile/lease/economy tests passed (in-memory UpdateAsync adapter, not Roblox DataStore)",tests))

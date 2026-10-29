@@ -9,6 +9,7 @@ local function signal()
 			return { Disconnect = function() handlers[key] = nil end }
 		end,
 		Fire = function(_, ...) for _, callback in handlers do callback(...) end end,
+		Count = function()local n=0;for _ in handlers do n+=1 end;return n end,
 	}
 end
 local clock = 0
@@ -147,4 +148,21 @@ step(770); assert(snapshots[1].orderIndex == 3)
 move("fake_2"); step(775); trigger("fake_2")
 assert(chaseKinds[#chaseKinds] == "Fake" and snapshots[1].stage == "COOLDOWN")
 stopAgain()
+-- 실제 서비스 신호 연결을 유지한 채 20라운드를 가속 시간으로 만료시킨다.
+clock=1000
+local stopSoak=load(node("src/server/Services/RoundService")).start(world,remotes,{playerStates=stateStub,monsters=monsterStub,vehicles=vehicleStub,data=dataStub,cosmetics=cosmeticStub,shop=shopStub})
+step(clock)
+for round=1,20 do
+	step(clock+20);assert(snapshots[1].phase=="PREPARING")
+	step(clock+10);assert(snapshots[1].phase=="PLAYING"and snapshots[1].roundId==round)
+	for order=1,3 do step(clock+120)end
+	assert(snapshots[1].phase=="RESULTS"and snapshots[1].failures==3)
+	step(clock+15);assert(snapshots[1].phase=="WAITING")
+	assert(heartbeat:Count()==1)
+end
+stopSoak()
+assert(heartbeat:Count()==0 and added:Count()==0 and removing:Count()==0)
+for _,destination in world.destinations do assert(destination.prompt.Triggered:Count()==0 and destination.prompt.PromptButtonHoldBegan:Count()==0)end
+assert(remotes.Action.OnServerEvent:Count()==0 and remotes.Snapshot.OnServerInvoke==nil)
+print("PASS 20 accelerated timeout rounds and exact signal cleanup (mocks; no gameplay/memory profiling)")
 print("PASS RoundService integration: three orders, 360 reward, spectator exclusion, next-round rotation, late giant hold, partial timeouts, all three chase hooks, shutdown (mock signals)")

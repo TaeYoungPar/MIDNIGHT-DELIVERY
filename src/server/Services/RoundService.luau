@@ -46,6 +46,8 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		local target = if spec and spec.kind == "Fake" then world.fakeCenter
 			elseif spec then world.destinations[spec.destination].target else nil
 		return {
+			preferences = if data and data:profile(player) and data:profile(player).preferences then table.clone(data:profile(player).preferences) else {muted=false,reducedMotion=false,largeText=false,hudMode="auto"},
+			tutorialSeen = if data and data:profile(player) then data:profile(player).tutorialSeen==true else false,
 			level = player:GetAttribute("Level") or 1,
 			data = if data then data:status(player) else {mode="LOADING",reason="",dirty=false},
 			owned = if data and data:profile(player) then table.clone(data:profile(player).owned) else {},
@@ -155,7 +157,9 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	end
 	table.insert(connections, remotes.Action.OnServerEvent:Connect(function(player, payload)
 		if not limiter:allow(player.UserId, now()) or typeof(payload) ~= "table" or payload.roundId ~= model.roundId then return end
-		if payload.kind == "VehicleInput" then vehicles:input(player, payload.throttle, payload.steer)
+		if payload.kind=="SetPreference" then data:preference(player,payload.key,payload.value)
+		elseif payload.kind=="TutorialComplete" then data:preference(player,"tutorialSeen",true)
+		elseif payload.kind == "VehicleInput" then vehicles:input(player, payload.throttle, payload.steer)
 		elseif payload.kind == "ResetVehicle" then vehicles:reset(player, true); publish()
 		elseif payload.kind == "ExitVehicle" then vehicles:exit(player); publish()
 		elseif payload.kind=="PurchaseWithCoins" or payload.kind=="EquipCosmetic" then

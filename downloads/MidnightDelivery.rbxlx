@@ -44,7 +44,7 @@ return table.freeze({
           <string name="Source"><![CDATA[--!strict
 -- 타이머와 보상은 서버에서도 같은 설정을 사용한다. 주문 3건의 제한과 고객별 조건도 중앙에서 관리한다.
 return table.freeze({
-	Build = "P5 저장·레벨·꾸미기 / Studio 검증 대기",
+	Build = "P6 접근성·안내·마감 / 출시 QA 대기",
 	Round = table.freeze({ Waiting = 20, Preparing = 10, Playing = 420, Results = 15, MaxPlayers = 4 }),
 	Delivery = table.freeze({ Reward = 80, XP = 20, Distance = 12, Cooldown = 0.6 }),
 	Orders = table.freeze({ Duration = 120, GhostHold = 4, GhostCooldown = 10, GiantHot = 90, GiantCalm = 3, FakeLock = 10 }),
@@ -108,10 +108,23 @@ return table.freeze({
       </Item>
       <Item class="ModuleScript" referent="8">
         <Properties>
+          <string name="Name">TutorialSteps</string>
+          <string name="Source"><![CDATA[--!strict
+return table.freeze({
+	{title="1 / 주문부터 확인",body="로비 20초와 준비 10초 뒤 자동 시작합니다.\n중도 입장은 다음 판부터 합류합니다. 왼쪽 주문 카드를 펼쳐 규칙을 읽으세요."},
+	{title="2 / 자기 스쿠터로 출발",body="본부 앞 자기 이름의 스쿠터에 E/터치로 탑승.\nWASD 또는 모바일 방향 버튼으로 운전하고 스페이스/하차로 내리세요."},
+	{title="3 / 현관에서 규칙 지키기",body="유령은 3회 노크 후 4초 정면 유지, 거인은 식기 전에 배달.\n외곽 집은 우편함 단서로 찾습니다. 잡히면 팀원 구조 또는 12초 뒤 복귀!"},
+})
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
           <string name="Name">Types</string>
           <string name="Source"><![CDATA[--!strict
 export type Phase = "WAITING" | "PREPARING" | "PLAYING" | "RESULTS"
 export type Snapshot = {
+	preferences: { muted: boolean, reducedMotion: boolean, largeText: boolean, hudMode: string }, tutorialSeen: boolean,
 	level: number, data: { mode: string, reason: string, dirty: boolean }, owned: { [string]: boolean }, equipped: { [string]: string },
 	vehicle: { owned: boolean, seated: boolean, speed: number, resetAt: number }, stamina: number,
 	downUntil: number, protectedUntil: number, members: { { name: string, downUntil: number } },
@@ -129,15 +142,15 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="9">
+  <Item class="ServerScriptService" referent="10">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="10">
+    <Item class="Folder" referent="11">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="Script" referent="11">
+      <Item class="Script" referent="12">
         <Properties>
           <string name="Name">Bootstrap</string>
           <token name="RunContext">0</token>
@@ -167,15 +180,15 @@ folder.Parent = ReplicatedStorage
 local stop = RoundService.start(world, remotes)
 Players.CharacterAutoLoads = true
 game:BindToClose(stop)
-print("[MidnightDelivery] Server bootstrap ready (P5)")
+print("[MidnightDelivery] Server bootstrap ready (P6)")
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="12">
+      <Item class="Folder" referent="13">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="ModuleScript" referent="13">
+        <Item class="ModuleScript" referent="14">
           <Properties>
             <string name="Name">ActionLimiter</string>
             <string name="Source"><![CDATA[--!strict
@@ -200,7 +213,7 @@ return Limiter
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="15">
           <Properties>
             <string name="Name">CosmeticService</string>
             <string name="Source"><![CDATA[--!strict
@@ -261,7 +274,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">DataService</string>
             <string name="Source"><![CDATA[--!strict
@@ -339,6 +352,18 @@ function Service:touch(player)
 	if h.mode=="READY" or h.mode=="SAVE_ERROR" then h.dirty=true end
 	self:sync(player,h)
 end
+function Service:preference(player,key,value): boolean
+	if not self:canEarn(player) then return false end
+	local profile=self:profile(player)
+	if not profile then return false end
+	if key=="tutorialSeen" then
+		if value~=true then return false end
+		profile.tutorialSeen=true
+	elseif Model.preference(key,value) then profile.preferences[key]=value
+	else return false end
+	self:touch(player);self:queueSave(player)
+	return true
+end
 function Service:queueSave(player)
 	local h=self.handles[player]
 	if h then h.nextSave=math.min(h.nextSave or math.huge,os.clock()+5) end
@@ -384,7 +409,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">EconomyService</string>
             <string name="Source"><![CDATA[--!strict
@@ -433,7 +458,7 @@ return Economy
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">MonsterService</string>
             <string name="Source"><![CDATA[--!strict
@@ -531,7 +556,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">MovementModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -559,7 +584,7 @@ return Model
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">OrderModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -655,7 +680,7 @@ return Order
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">OrderPlanner</string>
             <string name="Source"><![CDATA[--!strict
@@ -676,7 +701,7 @@ return Planner
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">PlayerStateModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -716,7 +741,7 @@ return State
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">PlayerStateService</string>
             <string name="Source"><![CDATA[--!strict
@@ -913,7 +938,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">ProfileModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -922,18 +947,27 @@ local Model = {}
 local MAX = 1000000000
 local thresholds = { 0, 100, 250, 450, 700, 1000, 1400, 1900, 2500, 3200 }
 export type Profile = { schemaVersion: number, coins: number, xp: number, lifetimeDeliveries: number,
-	owned: { [string]: boolean }, equipped: { [string]: string } }
+	owned: { [string]: boolean }, equipped: { [string]: string },
+	preferences: { muted: boolean, reducedMotion: boolean, largeText: boolean, hudMode: string }, tutorialSeen: boolean }
 export type Row = { schemaVersion: number, profile: Profile, revision: number, updatedAt: number,
 	lease: { token: string, expiresAt: number }? }
+function Model.defaultPreferences()
+	return {muted=false,reducedMotion=false,largeText=false,hudMode="auto"}
+end
+function Model.preference(key: any, value: any): boolean
+	if key=="hudMode" then return value=="auto" or value=="compact" or value=="expanded" end
+	return (key=="muted" or key=="reducedMotion" or key=="largeText") and typeof(value)=="boolean"
+end
 function Model.default(): Profile
-	return { schemaVersion = 1, coins = 0, xp = 0, lifetimeDeliveries = 0, owned = {}, equipped = {hat="",scooter="",badge=""} }
+	return { schemaVersion = 2, coins = 0, xp = 0, lifetimeDeliveries = 0, owned = {}, equipped = {hat="",scooter="",badge=""}, preferences=Model.defaultPreferences(), tutorialSeen=false }
 end
 function Model.integer(value: any, maximum: number?): boolean
 	return typeof(value) == "number" and value == value and value >= 0 and value <= (maximum or MAX) and value % 1 == 0
 end
 function Model.copy(profile: Profile): Profile
-	return { schemaVersion = 1, coins = profile.coins, xp = profile.xp, lifetimeDeliveries = profile.lifetimeDeliveries,
-		owned = table.clone(profile.owned), equipped = table.clone(profile.equipped) }
+	return { schemaVersion = 2, coins = profile.coins, xp = profile.xp, lifetimeDeliveries = profile.lifetimeDeliveries,
+		owned = table.clone(profile.owned), equipped = table.clone(profile.equipped),
+		preferences=table.clone(profile.preferences),tutorialSeen=profile.tutorialSeen }
 end
 function Model.level(xp: number): number
 	local level = 1
@@ -941,12 +975,12 @@ function Model.level(xp: number): number
 	return level
 end
 function Model.decode(raw: any): (Row?, string?)
-	if raw == nil then return {schemaVersion=1,profile=Model.default(),revision=0,updatedAt=0}, nil end
-	if typeof(raw) ~= "table" or raw.schemaVersion ~= 1 then return nil,"unsupported_schema" end
+	if raw == nil then return {schemaVersion=2,profile=Model.default(),revision=0,updatedAt=0}, nil end
+	if typeof(raw) ~= "table" or (raw.schemaVersion ~= 1 and raw.schemaVersion ~= 2) then return nil,"unsupported_schema" end
 	local source = if raw.profile ~= nil then raw.profile else raw
 	if typeof(source) ~= "table" or not Model.integer(source.coins) or not Model.integer(source.xp)
 		or not Model.integer(if source.lifetimeDeliveries ~= nil then source.lifetimeDeliveries else 0) then return nil,"invalid_currency" end
-	if source.schemaVersion ~= nil and source.schemaVersion ~= 1 then return nil,"unsupported_schema" end
+	if source.schemaVersion ~= nil and source.schemaVersion ~= 1 and source.schemaVersion ~= 2 then return nil,"unsupported_schema" end
 	local profile = Model.default()
 	profile.coins, profile.xp, profile.lifetimeDeliveries = source.coins, source.xp, if source.lifetimeDeliveries ~= nil then source.lifetimeDeliveries else 0
 	local owned = if source.owned ~= nil then source.owned elseif source.ownedCosmetics ~= nil then source.ownedCosmetics else {}
@@ -965,13 +999,28 @@ function Model.decode(raw: any): (Row?, string?)
 		if typeof(id) ~= "string" or (#id > 0 and not profile.owned[id]) then return nil,"unowned_equipped" end
 		profile.equipped[slot] = id
 	end
+	if source.preferences ~= nil then
+		if typeof(source.preferences)~="table" then return nil,"invalid_preferences" end
+		local prefs=source.preferences
+		for _,key in {"muted","reducedMotion","largeText","hudMode"}do
+			if prefs[key]~=nil and not Model.preference(key,prefs[key])then return nil,"invalid_preference"end
+		end
+		profile.preferences.muted=if prefs.muted~=nil then prefs.muted else false
+		profile.preferences.reducedMotion=if prefs.reducedMotion~=nil then prefs.reducedMotion else false
+		profile.preferences.largeText=if prefs.largeText~=nil then prefs.largeText else false
+		profile.preferences.hudMode=prefs.hudMode or "auto"
+	end
+	if source.tutorialSeen~=nil then
+		if typeof(source.tutorialSeen)~="boolean" then return nil,"invalid_tutorial_flag" end
+		profile.tutorialSeen=source.tutorialSeen
+	end
 	-- 최초 기획의 기본 스킨은 별도 파트가 없는 기본 외형으로 이행한다.
 	local revision = raw.revision or 0
 	if not Model.integer(revision) then return nil,"invalid_revision" end
 	local lease = raw.lease
 	if lease ~= nil and (typeof(lease) ~= "table" or typeof(lease.token) ~= "string" or #lease.token < 1 or #lease.token > 200
 		or not Model.integer(lease.expiresAt,1000000000000)) then return nil,"invalid_lease" end
-	return {schemaVersion=1,profile=profile,revision=revision,updatedAt=raw.updatedAt or 0,
+	return {schemaVersion=2,profile=profile,revision=revision,updatedAt=raw.updatedAt or 0,
 		lease=if lease then {token=lease.token,expiresAt=lease.expiresAt} else nil},nil
 end
 function Model.acquire(raw: any, token: string, now: number, ttl: number): (Row?, string?)
@@ -1009,7 +1058,7 @@ return Model
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">ProfileStore</string>
             <string name="Source"><![CDATA[--!strict
@@ -1089,7 +1138,7 @@ return Store
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">RoundModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -1172,7 +1221,7 @@ return RoundModel
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">RoundService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1223,6 +1272,8 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		local target = if spec and spec.kind == "Fake" then world.fakeCenter
 			elseif spec then world.destinations[spec.destination].target else nil
 		return {
+			preferences = if data and data:profile(player) and data:profile(player).preferences then table.clone(data:profile(player).preferences) else {muted=false,reducedMotion=false,largeText=false,hudMode="auto"},
+			tutorialSeen = if data and data:profile(player) then data:profile(player).tutorialSeen==true else false,
 			level = player:GetAttribute("Level") or 1,
 			data = if data then data:status(player) else {mode="LOADING",reason="",dirty=false},
 			owned = if data and data:profile(player) then table.clone(data:profile(player).owned) else {},
@@ -1332,7 +1383,9 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	end
 	table.insert(connections, remotes.Action.OnServerEvent:Connect(function(player, payload)
 		if not limiter:allow(player.UserId, now()) or typeof(payload) ~= "table" or payload.roundId ~= model.roundId then return end
-		if payload.kind == "VehicleInput" then vehicles:input(player, payload.throttle, payload.steer)
+		if payload.kind=="SetPreference" then data:preference(player,payload.key,payload.value)
+		elseif payload.kind=="TutorialComplete" then data:preference(player,"tutorialSeen",true)
+		elseif payload.kind == "VehicleInput" then vehicles:input(player, payload.throttle, payload.steer)
 		elseif payload.kind == "ResetVehicle" then vehicles:reset(player, true); publish()
 		elseif payload.kind == "ExitVehicle" then vehicles:exit(player); publish()
 		elseif payload.kind=="PurchaseWithCoins" or payload.kind=="EquipCosmetic" then
@@ -1463,13 +1516,13 @@ return RoundService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">SecurityService</string>
             <string name="Source"><![CDATA[--!strict
 local Security = {}
 Security.__index = Security
-type Record = { character: Model, position: Vector3, time: number, blockedUntil: number }
+type Record = { character: Model, position: Vector3, time: number, blockedUntil: number, credit: number }
 type State = { records: { [Player]: Record }, requests: { [Player]: number }, interactions: { [Player]: number } }
 type Service = typeof(setmetatable({} :: State, Security))
 
@@ -1505,13 +1558,18 @@ function Security.sample(self: Service, player: Player, now: number, allowedSpee
 	end
 	local record = self.records[player]
 	if not record or record.character ~= character then
-		self.records[player] = { character = character, position = position, time = now, blockedUntil = now + 2 }
+		self.records[player] = { character = character, position = position, time = now, blockedUntil = now + 2, credit = 12 }
 		return
 	end
 	-- 허용 속도는 서버가 확인한 좌석 소유/탑승 상태에서만 확장한다.
 	local delta = position - record.position
 	local horizontal = Vector3.new(delta.X, 0, delta.Z).Magnitude
-	if horizontal > (allowedSpeed or 28) * (now - record.time) + 8 then record.blockedUntil = now + 3 end
+	local speed=allowedSpeed or 28
+	local available=record.credit+speed*math.max(0,now-record.time)
+	if horizontal>available then
+		record.blockedUntil=now+math.max(3,horizontal/speed)
+		record.credit=0
+	else record.credit=math.min(12,available-horizontal)end
 	record.position, record.time = position, now
 end
 
@@ -1540,7 +1598,7 @@ return Security
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">ShopService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1572,7 +1630,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1764,11 +1822,11 @@ return Service
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="30">
+      <Item class="Folder" referent="31">
         <Properties>
           <string name="Name">World</string>
         </Properties>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">BuildingFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1827,7 +1885,44 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="32">
+        <Item class="ModuleScript" referent="33">
+          <Properties>
+            <string name="Name">DecorationFactory</string>
+            <string name="Source"><![CDATA[--!strict
+local P=require(script.Parent.Primitives)
+local Factory={}
+function Factory.escapePaths(parent: Instance,id: string,origin: Vector3)
+	local model=Instance.new("Model");model.Name=id.."_Paths";model.Parent=parent
+	-- 건물 양옆 통로를 뒤쪽 연결로 이어 막다른 구석을 줄인다. 실제 추격 동선은 Studio에서 검증한다.
+	for _,side in {-1,1}do
+		P.part(model,"SidePath",Vector3.new(8,0.12,66),CFrame.new(origin.X+side*24,0.22,origin.Z+2),Color3.fromRGB(72,84,102),Enum.Material.Concrete)
+	end
+	for _,z in {-25,28}do
+		P.part(model,"CrossPath",Vector3.new(56,0.12,8),CFrame.new(origin.X,0.22,origin.Z+z),Color3.fromRGB(72,84,102),Enum.Material.Concrete)
+	end
+end
+function Factory.headquarters(parent: Instance,origin: Vector3)
+	local model=Instance.new("Model");model.Name="HeadquartersDetails";model.Parent=parent
+	local orange=Color3.fromRGB(255,170,69)
+	local frame=CFrame.new(origin)*CFrame.Angles(0,math.pi,0)
+	P.sign(model,"영업 중 / NIGHT SHIFT",frame*CFrame.new(-20,9,-21),Vector3.new(16,3,0.4),Color3.fromRGB(99,216,184))
+	for x=-12,12,8 do
+		P.part(model,"PizzaBox",Vector3.new(5,0.7,4),frame*CFrame.new(x,5.3,8),orange)
+	end
+	local clerk=Instance.new("Model");clerk.Name="ShopGuide";clerk.Parent=model
+	local cf=frame*CFrame.new(22,0,9)
+	P.part(clerk,"Apron",Vector3.new(3.5,4,2),cf*CFrame.new(0,5,0),Color3.fromRGB(27,39,64))
+	local head=P.part(clerk,"Head",Vector3.new(2.8,2.8,2.8),cf*CFrame.new(0,8.5,0),Color3.fromRGB(245,207,164));head.Shape=Enum.PartType.Ball
+	P.part(clerk,"Cap",Vector3.new(3.1,0.5,3.1),cf*CFrame.new(0,10,0),orange)
+	for _,x in {-0.6,0.6}do P.part(clerk,"Eye",Vector3.new(0.3,0.4,0.2),cf*CFrame.new(x,8.7,-1.35),Color3.fromRGB(27,39,64))end
+	P.sign(clerk,"꾸미기 안내\n상단 메뉴 → 상점",cf*CFrame.new(0,3,-1.2),Vector3.new(10,4,0.3),orange)
+	for _,part in clerk:GetDescendants()do if part:IsA("BasePart")then part.CanCollide=false end end
+end
+return Factory
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">MonsterFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1884,7 +1979,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">NavigationSigns</string>
             <string name="Source"><![CDATA[--!strict
@@ -1913,7 +2008,7 @@ return Navigation
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">Primitives</string>
             <string name="Source"><![CDATA[--!strict
@@ -1951,7 +2046,7 @@ return Primitives
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">VehicleFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1992,7 +2087,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">WorldBuilder</string>
             <string name="Source"><![CDATA[--!strict
@@ -2003,6 +2098,7 @@ local P = require(script.Parent.Primitives)
 local Building = require(script.Parent.BuildingFactory)
 local Navigation = require(script.Parent.NavigationSigns)
 local Catalog = require(ReplicatedStorage.Shared.OrderCatalog)
+local Decor=require(script.Parent.DecorationFactory)
 local WorldBuilder = {}
 local cyan = Color3.fromRGB(99, 216, 232)
 
@@ -2034,6 +2130,7 @@ function WorldBuilder.build()
 			P.part(roads, "CenterMark", Vector3.new(9, 0.05, 0.5), CFrame.new(x, 0.26, -20), Color3.fromRGB(255, 213, 137))
 		end
 		Building.headquarters(folders.Lobby, Config.Map.Headquarters)
+		Decor.headquarters(folders.Lobby,Config.Map.Headquarters)
 		local destinations = {}
 		local function destination(id, position, color, style)
 			local house, door = Building.house(folders.Buildings, id, position, color, style)
@@ -2045,6 +2142,7 @@ function WorldBuilder.build()
 			prompt.HoldDuration, prompt.MaxActivationDistance = 0.6, Config.Delivery.Distance
 			prompt.RequiresLineOfSight, prompt.Enabled, prompt.Parent = true, false, marker
 			destinations[id] = { prompt = prompt, target = door.CFrame:PointToWorldSpace(marker.Position), door = door }
+			Decor.escapePaths(roads,id,position)
 		end
 		destination("ghost_house", Config.Map.GhostHouse, Color3.fromRGB(63, 112, 228), { label = "01 · 파란 지붕집" })
 		destination("giant_house", Config.Map.GiantHouse, Color3.fromRGB(255, 170, 69), { label = "02 · 거인의 집" })
@@ -2056,6 +2154,9 @@ function WorldBuilder.build()
 		end
 		P.part(roads, "GiantRoad", Vector3.new(200, 0.2, 30), CFrame.new(100, 0.12, 120), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
 		P.part(roads, "OuterRoad", Vector3.new(180, 0.2, 30), CFrame.new(20, 0.12, 230), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
+		Building.house(folders.Buildings,"convenience_store",Vector3.new(205,0,-65),Color3.fromRGB(99,216,184),{label="24H 야식 편의점 · 길안내"})
+		P.part(roads,"StoreRoad",Vector3.new(220,0.2,24),CFrame.new(100,0.12,-94),Color3.fromRGB(32,35,48),Enum.Material.Asphalt)
+		P.sign(roads,"배달 구역 끝 / 돌아가기",CFrame.new(0,8,295),Vector3.new(24,4,0.7),cyan,true)
 		local spawn = Instance.new("SpawnLocation")
 		spawn.Name, spawn.Size, spawn.CFrame = "LobbySpawn", Vector3.new(16, 1, 10), CFrame.new(Config.Map.Spawn) * CFrame.Angles(0, math.pi, 0)
 		spawn.Anchored, spawn.Neutral, spawn.Duration = true, true, 3
@@ -2106,25 +2207,25 @@ return WorldBuilder
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="37">
+  <Item class="SoundService" referent="39">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="38">
+  <Item class="StarterPlayer" referent="40">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="39">
+    <Item class="StarterPlayerScripts" referent="41">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="40">
+      <Item class="Folder" referent="42">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="41">
+        <Item class="LocalScript" referent="43">
           <Properties>
             <string name="Name">Bootstrap</string>
             <string name="Source"><![CDATA[--!strict
@@ -2141,14 +2242,17 @@ end
 local stateRemote = folder:WaitForChild(Names.State)
 local feedbackRemote = folder:WaitForChild(Names.Feedback)
 local snapshotRemote = folder:WaitForChild(Names.Snapshot)
-local controls = require(script.Parent.Controllers.InputController).start(folder:WaitForChild(Names.Action))
-local audio = require(script.Parent.Controllers.AudioController).start()
-local shop = require(script.Parent.Controllers.ShopController).start(folder:WaitForChild(Names.Action))
+local settings=require(script.Parent.Controllers.SettingsController).start(folder:WaitForChild(Names.Action))
+local disconnectSettings=settings.subscribe(hud.configure)
+local controls = require(script.Parent.Controllers.InputController).start(folder:WaitForChild(Names.Action),settings)
+local audio = require(script.Parent.Controllers.AudioController).start(settings)
+local shop = require(script.Parent.Controllers.ShopController).start(folder:WaitForChild(Names.Action),settings)
+local tutorial=require(script.Parent.Controllers.TutorialController).start(folder:WaitForChild(Names.Action),settings)
 local latestVersion = -1
 local function update(snapshot)
 	if not snapshot or snapshot.version < latestVersion then return end
 	latestVersion = snapshot.version
-	hud.update(snapshot); controls.update(snapshot); audio.update(snapshot); shop.update(snapshot)
+	settings.update(snapshot);hud.update(snapshot); controls.update(snapshot); audio.update(snapshot); shop.update(snapshot);tutorial.update(snapshot)
 end
 local stateConnection = stateRemote.OnClientEvent:Connect(update)
 local feedbackConnection = feedbackRemote.OnClientEvent:Connect(hud.feedback)
@@ -2164,21 +2268,24 @@ end)
 script.Destroying:Connect(function()
 	stateConnection:Disconnect()
 	feedbackConnection:Disconnect()
+	tutorial.destroy()
+	disconnectSettings()
 	shop.destroy()
 	controls.destroy()
 	audio.destroy()
+	settings.destroy()
 	hud.destroy()
 	stopSpawn()
 end)
-print("[MidnightDelivery] Client GUI ready (P5)")
+print("[MidnightDelivery] Client GUI ready (P6)")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="42">
+        <Item class="Folder" referent="44">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="43">
+          <Item class="ModuleScript" referent="45">
             <Properties>
               <string name="Name">AudioController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2189,7 +2296,7 @@ local RunService = game:GetService("RunService")
 local Catalog = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("AudioCatalog"))
 local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
 local Controller = {}
-function Controller.start()
+function Controller.start(settings)
 	local group = Instance.new("SoundGroup")
 	group.Name, group.Volume, group.Parent = "MidnightAudio", 1, SoundService
 	local sounds, connections = {}, {}
@@ -2210,15 +2317,24 @@ function Controller.start()
 	mute.BackgroundColor3, mute.TextColor3, mute.Font, mute.TextSize = Color3.fromRGB(27,39,64), Color3.fromRGB(246,244,235), Enum.Font.GothamMedium, 14
 	mute.Text = "소리 켜짐"
 	local corner = Instance.new("UICorner"); corner.Parent = mute
+	if settings then settings.register(mute) end
 	local function route(instance)
 		if instance:IsA("Sound") and not instance.SoundGroup then instance.SoundGroup = group; routed[instance] = true end
 	end
 	for _, instance in workspace:GetDescendants() do route(instance) end
 	table.insert(connections,workspace.DescendantAdded:Connect(route))
 	table.insert(connections,mute.Activated:Connect(function()
-		muted = not muted; group.Volume = if muted then 0 else 1
-		mute.Text = if muted then "소리 꺼짐" else "소리 켜짐"
+		if settings then settings.set("muted",not settings.get().muted)
+		else
+			muted = not muted; group.Volume = if muted then 0 else 1
+			mute.Text = if muted then "소리 꺼짐" else "소리 켜짐"
+		end
 	end))
+	local disconnectSettings=nil
+	if settings then disconnectSettings=settings.subscribe(function(options)
+		muted=options.muted;group.Volume=if muted or options.loaded==false then 0 else 1
+		mute.Text=if muted then "소리 꺼짐"else"소리 켜짐"
+	end)end
 	local function play(name: string)
 		local sound = sounds[name]
 		if sound then sound.TimePosition = 0; sound:Play() end
@@ -2266,7 +2382,8 @@ function Controller.start()
 			for _, connection in connections do connection:Disconnect() end
 			for sound in routed do if sound.Parent and sound.SoundGroup == group then sound.SoundGroup = nil end end
 			for _, sound in sounds do sound:Destroy() end
-			group:Destroy(); gui:Destroy()
+			if disconnectSettings then disconnectSettings()end
+			mute:Destroy();group:Destroy(); gui:Destroy()
 		end,
 	}
 end
@@ -2274,13 +2391,14 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="44">
+          <Item class="ModuleScript" referent="46">
             <Properties>
               <string name="Name">HUDController</string>
               <string name="Source"><![CDATA[--!strict
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
+local TweenService=game:GetService("TweenService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local Strings = require(Shared:WaitForChild("Strings"))
 local Types = require(Shared:WaitForChild("Types"))
@@ -2293,6 +2411,11 @@ function HUD.start()
 	local state: Types.Snapshot? = nil
 	local collapsed, toastUntil = UIS.TouchEnabled, 0
 	local connections = {}
+	local options={reducedMotion=false,largeText=false}
+	local previousMode,previousCompact=nil,nil
+	local tween=nil
+	local fontSizes={}
+	for _,item in ui.gui:GetDescendants()do if item:IsA("TextLabel")or item:IsA("TextButton")then fontSizes[item]=item.TextSize end end
 	local function render()
 		if not state then return end
 		ui.phase.Text = Strings[state.phase] or state.phase
@@ -2313,9 +2436,9 @@ function HUD.start()
 			ui.title.Text, ui.hint.Text = Strings.Title, "자동으로 시작합니다.\n주문 확인 → 네온 길 따라 이동 → 현관 배달"
 		end
 		ui.hint.Visible = not collapsed
-		ui.card.Size = UDim2.fromOffset(math.min(300, math.max(190, ui.root.AbsoluteSize.X - 140)), if collapsed then 42 else 142)
-		ui.stats.Position = UDim2.fromOffset(16, if collapsed then 134 else 234)
-		ui.note.Position = UDim2.fromOffset(16, if collapsed then 182 else 282)
+		ui.card.Size = UDim2.fromOffset(math.min(300, math.max(190, ui.root.AbsoluteSize.X - 140)), if collapsed then 42 else (if options.largeText then 164 else 142))
+		ui.stats.Position = UDim2.fromOffset(16, if collapsed then 134 else (if options.largeText then 256 else 234))
+		ui.note.Position = UDim2.fromOffset(16, if collapsed then 182 else (if options.largeText then 304 else 282))
 		ui.toggle.Text = if collapsed then "주문 펼치기" else "주문 접기"
 	end
 	table.insert(connections, ui.toggle.Activated:Connect(function() collapsed = not collapsed; render() end))
@@ -2335,8 +2458,18 @@ function HUD.start()
 			ui.recovery.Text = if state.chase.targetId == player.UserId then "괴물이 쫓아옵니다! 도로를 따라 도망치세요" else "팀원이 추격당하고 있습니다!"
 		else ui.recovery.Text = "" end
 		local members = {}
-		for _, member in state.members do table.insert(members, member.name .. (if member.downUntil > now then " · 구조 필요" else " · 정상")) end
+		for _, member in state.members do
+			local cut=utf8.offset(member.name,11)
+			local name=if cut then string.sub(member.name,1,cut-1).."…"else member.name
+			table.insert(members, name .. (if member.downUntil > now then " · 구조 필요" else " · 정상"))
+		end
 		ui.team.Text = table.concat(members, "  /  ")
+		local compactTeam=UIS.TouchEnabled or ui.root.AbsoluteSize.Y<500
+		ui.team.Visible=not compactTeam
+		if compactTeam then
+			local down=0;for _,member in state.members do if member.downUntil>now then down+=1 end end
+			ui.stats.Text=string.format("Lv.%d · %d Coins\n참가 %d명 · 구조 필요 %d명",state.level,state.coins,#state.members,down)
+		end
 		if state.phase == "PLAYING" and state.participant then
 			local detail = state.orderHint
 			if state.stage == "HOLDING" then detail = string.format("문을 향한 채 그대로! %d초", math.max(0, math.ceil(state.holdUntil - now)))
@@ -2374,16 +2507,30 @@ function HUD.start()
 	end))
 	ui.arrow.Visible, ui.distance.Visible = false, false
 	return {
+		configure=function(value)
+			options=value
+			if value.hudMode~=previousMode or value.compactHUD~=previousCompact then collapsed=value.compactHUD end
+			previousMode,previousCompact=value.hudMode,value.compactHUD
+			for item,size in fontSizes do item.TextSize=math.floor(size*(if value.largeText then 1.15 else 1)+0.5)end
+			if value.reducedMotion and tween then tween:Cancel();tween=nil;ui.toast.TextTransparency=0 end
+			render()
+		end,
 		update = function(snapshot: Types.Snapshot?)
 			if not snapshot or (state and snapshot.version < state.version) then return end
 			state = snapshot
 			render()
 		end,
 		feedback = function(message: string)
+			if tween then tween:Cancel();tween=nil end
 			ui.toast.Text, toastUntil = message, workspace:GetServerTimeNow() + 4
+			ui.toast.TextTransparency=if options.reducedMotion then 0 else 1
+			if not options.reducedMotion then
+				tween=TweenService:Create(ui.toast,TweenInfo.new(0.2,Enum.EasingStyle.Quad),{TextTransparency=0});tween:Play()
+			end
 		end,
 		destroy = function()
 			for _, connection in connections do connection:Disconnect() end
+			if tween then tween:Cancel()end
 			ui.gui:Destroy()
 		end,
 	}
@@ -2393,7 +2540,7 @@ return HUD
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="45">
+          <Item class="ModuleScript" referent="47">
             <Properties>
               <string name="Name">InputController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2402,7 +2549,7 @@ local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
 local Controller = {}
-function Controller.start(remote: RemoteEvent)
+function Controller.start(remote: RemoteEvent,settings)
 	local player = Players.LocalPlayer
 	local state: Types.Snapshot? = nil
 	local focused = true
@@ -2442,6 +2589,7 @@ function Controller.start(remote: RemoteEvent)
 	sprint.Size = UDim2.fromOffset(70,48)
 	local leave = button(gui,"하차",UDim2.new(1,-82,1,-160),UDim2.fromOffset(70,48))
 	local reset = button(gui,"차량 복구",UDim2.new(1,-124,0,188),UDim2.fromOffset(112,44))
+	if settings then settings.register(reset)end
 	table.insert(connections,leave.Activated:Connect(function() send("ExitVehicle") end))
 	table.insert(connections,reset.Activated:Connect(function() send("ResetVehicle") end))
 	table.insert(connections,UIS.InputEnded:Connect(function(input)
@@ -2475,7 +2623,7 @@ function Controller.start(remote: RemoteEvent)
 		end
 		sprint.Text = string.format("달리기\n%d%%",math.floor((player:GetAttribute("Stamina") or 5)*20))
 		local function pressed(name) return (held[name] or 0) > 0 end
-		local typing = UIS:GetFocusedTextBox() ~= nil
+		local typing = UIS:GetFocusedTextBox() ~= nil or (settings and settings.get().menuOpen==true)
 		if sprintElapsed >= 0.3 then
 			sprintElapsed = 0
 			send("Sprint",{enabled=focused and not typing and not riding and not down and (pressed("Sprint") or UIS:IsKeyDown(Enum.KeyCode.LeftShift))})
@@ -2494,14 +2642,109 @@ function Controller.start(remote: RemoteEvent)
 	end))
 	return {
 		update = function(snapshot: Types.Snapshot) state = snapshot end,
-		destroy = function() for _, connection in connections do connection:Disconnect() end; gui:Destroy() end,
+		destroy = function() for _, connection in connections do connection:Disconnect() end; reset:Destroy(); gui:Destroy() end,
 	}
 end
 return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="46">
+          <Item class="ModuleScript" referent="48">
+            <Properties>
+              <string name="Name">SettingsController</string>
+              <string name="Source"><![CDATA[--!strict
+local Players=game:GetService("Players")
+local UIS=game:GetService("UserInputService")
+local Controller={}
+function Controller.start(remote: RemoteEvent)
+	local prefs={muted=false,reducedMotion=false,largeText=false,hudMode="auto"}
+	local pending,subscribers,connections={}, {},{}
+	local state=nil
+	local gui=Instance.new("ScreenGui")
+	gui.Name,gui.ResetOnSpawn,gui.DisplayOrder,gui.ScreenInsets="MidnightSettings",false,25,Enum.ScreenInsets.CoreUISafeInsets
+	gui.Parent=Players.LocalPlayer:WaitForChild("PlayerGui")
+	local function button(parent,text)
+		local b=Instance.new("TextButton")
+		b.Text,b.Size,b.BackgroundColor3,b.TextColor3,b.Font,b.TextSize,b.Parent=text,UDim2.new(1,0,0,44),Color3.fromRGB(27,39,64),Color3.fromRGB(246,244,235),Enum.Font.GothamMedium,15,parent
+		local c=Instance.new("UICorner");c.Parent=b
+		return b
+	end
+	local gear=button(gui,"메뉴")
+	gear.Size,gear.Position=UDim2.fromOffset(44,44),UDim2.new(1,-56,0,16)
+	local drawer=Instance.new("ScrollingFrame")
+	drawer.AnchorPoint,drawer.Position,drawer.Size=Vector2.new(1,0),UDim2.new(1,-12,0,68),UDim2.new(0,210,1,-84)
+	drawer.BackgroundColor3,drawer.BorderSizePixel,drawer.Visible,drawer.Parent=Color3.fromRGB(17,25,44),0,false,gui
+	drawer.Active=true
+	drawer.CanvasSize,drawer.AutomaticCanvasSize,drawer.ScrollBarThickness=UDim2.new(),Enum.AutomaticSize.Y,4
+	local constraint=Instance.new("UISizeConstraint");constraint.MaxSize,constraint.Parent=Vector2.new(210,276),drawer
+	local padding=Instance.new("UIPadding");padding.PaddingLeft,padding.PaddingRight,padding.PaddingTop,padding.PaddingBottom=UDim.new(0,8),UDim.new(0,8),UDim.new(0,8),UDim.new(0,8);padding.Parent=drawer
+	local layout=Instance.new("UIListLayout");layout.Padding,layout.SortOrder,layout.Parent=UDim.new(0,8),Enum.SortOrder.LayoutOrder,drawer
+	local panel=Instance.new("ScrollingFrame")
+	panel.Active=true
+	panel.CanvasSize,panel.AutomaticCanvasSize,panel.ScrollBarThickness=UDim2.new(),Enum.AutomaticSize.Y,4
+	panel.AnchorPoint,panel.Position,panel.Size,panel.BackgroundColor3,panel.Visible,panel.Parent=Vector2.new(0.5,0.5),UDim2.fromScale(0.5,0.5),UDim2.new(1,-24,1,-24),Color3.fromRGB(17,25,44),false,gui
+	local limit=Instance.new("UISizeConstraint");limit.MaxSize,limit.Parent=Vector2.new(420,334),panel
+	local pad=Instance.new("UIPadding");pad.PaddingTop,pad.PaddingBottom,pad.PaddingLeft,pad.PaddingRight=UDim.new(0,10),UDim.new(0,10),UDim.new(0,10),UDim.new(0,10);pad.Parent=panel
+	local list=Instance.new("UIListLayout");list.Padding,list.Parent=UDim.new(0,7),panel
+	local status=Instance.new("TextLabel")
+	status.Size,status.BackgroundTransparency,status.TextColor3,status.TextWrapped,status.TextSize,status.Parent=UDim2.new(1,0,0,44),1,Color3.fromRGB(246,244,235),true,14,panel
+	local controls={}
+	for _,key in {"muted","reducedMotion","largeText","hudMode"}do controls[key]=button(panel,"")end
+	local close=button(panel,"닫기")
+	local index=0
+	local function register(b)
+		index+=1;b.LayoutOrder=index;b.Position=UDim2.new();b.Size=UDim2.new(1,-4,0,44);b.Parent=drawer
+		table.insert(connections,b.Activated:Connect(function()drawer.Visible=false end))
+	end
+	local open=button(gui,"화면·접근성 설정");register(open)
+	local function get()
+		local value=table.clone(prefs)
+		value.loaded=state~=nil and state.data.mode~="LOADING"
+		value.menuOpen=drawer.Visible or panel.Visible
+		value.compactHUD=if prefs.hudMode=="auto"then UIS.TouchEnabled else prefs.hudMode=="compact"
+		return value
+	end
+	local function redraw()
+		controls.muted.Text="소리: "..(if prefs.muted then "꺼짐"else"켜짐")
+		controls.reducedMotion.Text="알림 애니메이션: "..(if prefs.reducedMotion then "줄이기"else"기본")
+		controls.largeText.Text="HUD 글자: "..(if prefs.largeText then "크게"else"기본")
+		controls.hudMode.Text="주문 카드: "..(if prefs.hudMode=="auto"then"기기 자동"elseif prefs.hudMode=="compact"then"접기"else"펼치기")
+		status.Text=if state and (state.data.mode=="READY" or state.data.mode=="SAVING")then "화면 설정 · 자동 저장"else"화면 설정 · 현재 접속에 적용 · 저장 미연결"
+		for _,fn in subscribers do fn(get())end
+	end
+	local function set(key,value)
+		prefs[key]=value;pending[key]={value=value,time=os.clock(),sent=state~=nil and state.data.mode~="LOADING"}
+		if state and state.data.mode~="LOADING"then remote:FireServer({kind="SetPreference",roundId=state.roundId,key=key,value=value})end
+		redraw()
+	end
+	for _,key in {"muted","reducedMotion","largeText"}do table.insert(connections,controls[key].Activated:Connect(function()set(key,not prefs[key])end))end
+	table.insert(connections,controls.hudMode.Activated:Connect(function()set("hudMode",if prefs.hudMode=="auto"then"compact"elseif prefs.hudMode=="compact"then"expanded"else"auto")end))
+	table.insert(connections,gear.Activated:Connect(function()drawer.Visible=not drawer.Visible;panel.Visible=false end))
+	table.insert(connections,open.Activated:Connect(function()panel.Visible=true end))
+	table.insert(connections,close.Activated:Connect(function()panel.Visible=false end))
+	redraw()
+	return {
+		get=get,set=set,register=register,
+		subscribe=function(fn)table.insert(subscribers,fn);fn(get());return function()local i=table.find(subscribers,fn);if i then table.remove(subscribers,i)end end end,
+		update=function(snapshot)
+			state=snapshot
+			if snapshot.data.mode~="LOADING"then
+				for key,value in snapshot.preferences do
+					local p=pending[key]
+					if p and not p.sent then remote:FireServer({kind="SetPreference",roundId=snapshot.roundId,key=key,value=p.value});p.sent=true;p.time=os.clock()end
+					if not p or p.value==value or os.clock()-p.time>3 then prefs[key]=value;pending[key]=nil end
+				end
+			end
+			redraw()
+		end,
+		destroy=function()for _,c in connections do c:Disconnect()end;table.clear(subscribers);gui:Destroy()end,
+	}
+end
+return Controller
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="49">
             <Properties>
               <string name="Name">ShopController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2510,7 +2753,7 @@ local Shared=game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local Catalog=require(Shared:WaitForChild("Catalogs"))
 local Types=require(Shared:WaitForChild("Types"))
 local Controller={}
-function Controller.start(remote: RemoteEvent)
+function Controller.start(remote: RemoteEvent,settings)
 	local state: Types.Snapshot?=nil
 	local connections,rows={},{}
 	local gui=Instance.new("ScreenGui")
@@ -2531,6 +2774,7 @@ function Controller.start(remote: RemoteEvent)
 		return b
 	end
 	local open=button(gui,"꾸미기 상점",UDim2.new(1,-124,0,240),UDim2.fromOffset(112,44))
+	if settings then settings.register(open)end
 	local overlay=Instance.new("Frame")
 	overlay.Size,overlay.BackgroundColor3,overlay.BackgroundTransparency,overlay.Visible,overlay.Parent=UDim2.fromScale(1,1),Color3.fromRGB(5,8,18),0.2,false,gui
 	overlay.Active=true
@@ -2581,14 +2825,14 @@ function Controller.start(remote: RemoteEvent)
 					elseif snapshot.coins<item.price then item.price.." Coins\n잔액 부족" else item.price.." Coins"
 			end
 		end,
-		destroy=function()for _,connection in connections do connection:Disconnect()end;gui:Destroy()end,
+		destroy=function()for _,connection in connections do connection:Disconnect()end;open:Destroy();gui:Destroy()end,
 	}
 end
 return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="47">
+          <Item class="ModuleScript" referent="50">
             <Properties>
               <string name="Name">SpawnController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2624,12 +2868,81 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
+          <Item class="ModuleScript" referent="51">
+            <Properties>
+              <string name="Name">TutorialController</string>
+              <string name="Source"><![CDATA[--!strict
+local Players=game:GetService("Players")
+local Steps=require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("TutorialSteps"))
+local Controller={}
+function Controller.start(remote: RemoteEvent,settings)
+	local step,done,manual,pending=1,false,false,false
+	local state=nil
+	local lastSent=-math.huge
+	local gui=Instance.new("ScreenGui")
+	gui.Name,gui.ResetOnSpawn,gui.DisplayOrder,gui.ScreenInsets="MidnightTutorial",false,30,Enum.ScreenInsets.CoreUISafeInsets
+	gui.Parent=Players.LocalPlayer:WaitForChild("PlayerGui")
+	local panel=Instance.new("Frame")
+	panel.AnchorPoint,panel.Position,panel.Size=Vector2.new(0.5,0.5),UDim2.fromScale(0.5,0.45),UDim2.new(1,-24,0,218)
+	panel.BackgroundColor3,panel.BorderSizePixel,panel.Visible,panel.Parent=Color3.fromRGB(17,25,44),0,false,gui
+	local limit=Instance.new("UISizeConstraint");limit.MaxSize,limit.Parent=Vector2.new(480,218),panel
+	local corner=Instance.new("UICorner");corner.Parent=panel
+	local function label(position,size,font)
+		local l=Instance.new("TextLabel")
+		l.Position,l.Size,l.TextSize,l.BackgroundTransparency,l.TextColor3,l.TextWrapped,l.Parent=position,size,font,1,Color3.fromRGB(246,244,235),true,panel
+		l.Font,l.TextXAlignment=Enum.Font.GothamMedium,Enum.TextXAlignment.Left
+		return l
+	end
+	local title=label(UDim2.fromOffset(14,6),UDim2.new(1,-28,0,32),20)
+	local body=label(UDim2.fromOffset(14,44),UDim2.new(1,-28,0,112),16)
+	local function button(text,position,size,parent)
+		local b=Instance.new("TextButton")
+		b.Text,b.Position,b.Size,b.BackgroundColor3,b.TextColor3,b.Font,b.TextSize,b.Parent=text,position,size,Color3.fromRGB(255,170,69),Color3.fromRGB(17,25,44),Enum.Font.GothamMedium,16,parent
+		local c=Instance.new("UICorner");c.Parent=b
+		return b
+	end
+	local nextButton=button("다음",UDim2.new(1,-128,1,-54),UDim2.fromOffset(114,44),panel)
+	local skip=button("안내 닫기",UDim2.new(0,14,1,-54),UDim2.fromOffset(114,44),panel)
+	local replay=button("게임 방법 다시 보기",UDim2.new(),UDim2.fromOffset(180,44),gui)
+	settings.register(replay)
+	local function render()
+		title.Text,body.Text=Steps[step].title,Steps[step].body
+		nextButton.Text=if step==#Steps then "알겠어요"else"다음"
+		panel.Visible=state~=nil and state.downUntil<=workspace:GetServerTimeNow() and not state.vehicle.seated
+			and (manual or ((state.phase=="WAITING" or not state.participant) and state.data.mode~="LOADING" and not state.tutorialSeen and not done))
+	end
+	local function complete()
+		done,manual,pending=true,false,true
+		render()
+		if state and state.data.mode~="LOADING"then remote:FireServer({kind="TutorialComplete",roundId=state.roundId});lastSent=os.clock()end
+	end
+	local connections={
+		nextButton.Activated:Connect(function()if step<#Steps then step+=1;render()else complete()end end),
+		skip.Activated:Connect(complete),
+		replay.Activated:Connect(function()step,manual=1,true;render()end),
+	}
+	return {
+		update=function(snapshot)
+			state=snapshot
+			if snapshot.tutorialSeen then pending=false end
+			if pending and snapshot.data.mode~="LOADING"and os.clock()-lastSent>=1 then
+				remote:FireServer({kind="TutorialComplete",roundId=snapshot.roundId});lastSent=os.clock()
+			end
+			render()
+		end,
+		destroy=function()for _,c in connections do c:Disconnect()end;replay:Destroy();gui:Destroy()end,
+	}
+end
+return Controller
+]]></string>
+            </Properties>
+          </Item>
         </Item>
-        <Item class="Folder" referent="48">
+        <Item class="Folder" referent="52">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="49">
+          <Item class="ModuleScript" referent="53">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--!strict
@@ -2641,7 +2954,7 @@ return table.freeze({
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="50">
+          <Item class="ModuleScript" referent="54">
             <Properties>
               <string name="Name">UIFactory</string>
               <string name="Source"><![CDATA[--!strict
@@ -2681,9 +2994,11 @@ function Factory.create(playerGui: Instance)
 	local root = Instance.new("Frame")
 	root.Name, root.Size, root.BackgroundTransparency, root.Parent = "SafeRoot", UDim2.fromScale(1, 1), 1, gui
 	local header = panel(root, "Header", UDim2.new(0, 12, 0, 8), UDim2.new(1, -24, 0, 66))
-	label(header, "Brand", Strings.Subtitle, UDim2.fromOffset(14, 6), UDim2.new(0.6, 0, 0, 20), 14, Theme.Orange)
-	local phase = label(header, "Phase", "서버 연결 중…", UDim2.fromOffset(14, 28), UDim2.new(0.72, -14, 0, 30), 17)
+	label(header, "Brand", Strings.Subtitle, UDim2.fromOffset(14, 6), UDim2.new(1, -150, 0, 20), 14, Theme.Orange)
+	local phase = label(header, "Phase", "서버 연결 중…", UDim2.fromOffset(14, 28), UDim2.new(1, -150, 0, 30), 17)
 	local timer = label(header, "Timer", "--:--", UDim2.new(0.75, 0, 0, 15), UDim2.new(0.25, -14, 0, 40), 25, Theme.Cyan)
+	timer.AnchorPoint=Vector2.new(1,0)
+	timer.Position,timer.Size=UDim2.new(1,-58,0,15),UDim2.fromOffset(76,40)
 	timer.TextXAlignment = Enum.TextXAlignment.Right
 	local card = panel(root, "Order", UDim2.fromOffset(12, 84), UDim2.fromOffset(300, 142))
 	local title = label(card, "Title", Strings.Title, UDim2.fromOffset(12, 10), UDim2.new(1, -24, 0, 25), 18, Theme.Orange)
@@ -2716,7 +3031,7 @@ return Factory
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="51">
+  <Item class="Workspace" referent="55">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

@@ -47,4 +47,17 @@ heartbeat:Fire(0.1);assert(byName.Motor.Playing and byName.Motor.PlaybackSpeed>0
 player.Character=nil;heartbeat:Fire(0.1);assert(not byName.Motor.Playing)
 audio.destroy();assert(characterSound.SoundGroup==nil and groups[1].destroyed)
 for _,sound in sounds do if sound~=characterSound then assert(sound.destroyed)end end
+local options={muted=true,loaded=false}
+local subscribed=nil
+local bridge={
+	register=function()end,get=function()return options end,
+	set=function(key,value)options[key]=value;if subscribed then subscribed(options)end end,
+	subscribe=function(fn)subscribed=fn;fn(options);return function()subscribed=nil end end,
+}
+local linked=module.start(bridge)
+assert(groups[#groups].Volume==0,"audio must stay silent before saved preferences load")
+options.loaded=true;subscribed(options);assert(groups[#groups].Volume==0)
+bridge.set("muted",false);assert(groups[#groups].Volume==1)
+buttons[#buttons].Activated:Fire();assert(options.muted and groups[#groups].Volume==0)
+linked.destroy();assert(subscribed==nil)
 print("PASS audio catalog, order/reward/down/recovery/chase hooks, wind/motor loops, mute/unmute, sound routing and cleanup (mocked playback; not audible validation)")

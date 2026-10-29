@@ -6,6 +6,7 @@ local P = require(script.Parent.Primitives)
 local Building = require(script.Parent.BuildingFactory)
 local Navigation = require(script.Parent.NavigationSigns)
 local Catalog = require(ReplicatedStorage.Shared.OrderCatalog)
+local Decor=require(script.Parent.DecorationFactory)
 local WorldBuilder = {}
 local cyan = Color3.fromRGB(99, 216, 232)
 
@@ -37,6 +38,7 @@ function WorldBuilder.build()
 			P.part(roads, "CenterMark", Vector3.new(9, 0.05, 0.5), CFrame.new(x, 0.26, -20), Color3.fromRGB(255, 213, 137))
 		end
 		Building.headquarters(folders.Lobby, Config.Map.Headquarters)
+		Decor.headquarters(folders.Lobby,Config.Map.Headquarters)
 		local destinations = {}
 		local function destination(id, position, color, style)
 			local house, door = Building.house(folders.Buildings, id, position, color, style)
@@ -48,6 +50,7 @@ function WorldBuilder.build()
 			prompt.HoldDuration, prompt.MaxActivationDistance = 0.6, Config.Delivery.Distance
 			prompt.RequiresLineOfSight, prompt.Enabled, prompt.Parent = true, false, marker
 			destinations[id] = { prompt = prompt, target = door.CFrame:PointToWorldSpace(marker.Position), door = door }
+			Decor.escapePaths(roads,id,position)
 		end
 		destination("ghost_house", Config.Map.GhostHouse, Color3.fromRGB(63, 112, 228), { label = "01 · 파란 지붕집" })
 		destination("giant_house", Config.Map.GiantHouse, Color3.fromRGB(255, 170, 69), { label = "02 · 거인의 집" })
@@ -59,6 +62,9 @@ function WorldBuilder.build()
 		end
 		P.part(roads, "GiantRoad", Vector3.new(200, 0.2, 30), CFrame.new(100, 0.12, 120), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
 		P.part(roads, "OuterRoad", Vector3.new(180, 0.2, 30), CFrame.new(20, 0.12, 230), Color3.fromRGB(32, 35, 48), Enum.Material.Asphalt)
+		Building.house(folders.Buildings,"convenience_store",Vector3.new(205,0,-65),Color3.fromRGB(99,216,184),{label="24H 야식 편의점 · 길안내"})
+		P.part(roads,"StoreRoad",Vector3.new(220,0.2,24),CFrame.new(100,0.12,-94),Color3.fromRGB(32,35,48),Enum.Material.Asphalt)
+		P.sign(roads,"배달 구역 끝 / 돌아가기",CFrame.new(0,8,295),Vector3.new(24,4,0.7),cyan,true)
 		local spawn = Instance.new("SpawnLocation")
 		spawn.Name, spawn.Size, spawn.CFrame = "LobbySpawn", Vector3.new(16, 1, 10), CFrame.new(Config.Map.Spawn) * CFrame.Angles(0, math.pi, 0)
 		spawn.Anchored, spawn.Neutral, spawn.Duration = true, true, 3

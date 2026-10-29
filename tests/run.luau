@@ -146,4 +146,16 @@ test("teleport jump delays delivery and respawn requires fresh sample", function
 	security:remove(p)
 	assert(not security:canDeliver(p, root.Position, 12, 10, 0.75))
 end)
+test("movement budget rejects sustained overspeed without penalizing elapsed legitimate movement", function()
+	local security=Security.new()
+	local p,root=livePlayer(1)
+	security:sample(p,0)
+	for i=1,40 do root.Position=roblox.Vector3.new(i*1.6,0,0);security:sample(p,i*0.1)end
+	assert(security:canDeliver(p,root.Position,12,4,0.6))
+	for i=1,10 do root.Position+=roblox.Vector3.new(6,0,0);security:sample(p,4+i*0.1)end
+	assert(not security:canDeliver(p,root.Position,12,5,0.6))
+	security:authorizePosition(p,6)
+	root.Position+=roblox.Vector3.new(30,0,0);security:sample(p,11)
+	assert(security:canDeliver(p,root.Position,12,11,0.6))
+end)
 print(string.format("%d tests passed (pure Luau / mocked security only; no Roblox engine run)", passed))

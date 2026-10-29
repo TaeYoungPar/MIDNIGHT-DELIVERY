@@ -35,9 +35,11 @@ function Factory.create(playerGui: Instance)
 	local root = Instance.new("Frame")
 	root.Name, root.Size, root.BackgroundTransparency, root.Parent = "SafeRoot", UDim2.fromScale(1, 1), 1, gui
 	local header = panel(root, "Header", UDim2.new(0, 12, 0, 8), UDim2.new(1, -24, 0, 66))
-	label(header, "Brand", Strings.Subtitle, UDim2.fromOffset(14, 6), UDim2.new(0.6, 0, 0, 20), 14, Theme.Orange)
-	local phase = label(header, "Phase", "서버 연결 중…", UDim2.fromOffset(14, 28), UDim2.new(0.72, -14, 0, 30), 17)
+	label(header, "Brand", Strings.Subtitle, UDim2.fromOffset(14, 6), UDim2.new(1, -150, 0, 20), 14, Theme.Orange)
+	local phase = label(header, "Phase", "서버 연결 중…", UDim2.fromOffset(14, 28), UDim2.new(1, -150, 0, 30), 17)
 	local timer = label(header, "Timer", "--:--", UDim2.new(0.75, 0, 0, 15), UDim2.new(0.25, -14, 0, 40), 25, Theme.Cyan)
+	timer.AnchorPoint=Vector2.new(1,0)
+	timer.Position,timer.Size=UDim2.new(1,-58,0,15),UDim2.fromOffset(76,40)
 	timer.TextXAlignment = Enum.TextXAlignment.Right
 	local card = panel(root, "Order", UDim2.fromOffset(12, 84), UDim2.fromOffset(300, 142))
 	local title = label(card, "Title", Strings.Title, UDim2.fromOffset(12, 10), UDim2.new(1, -24, 0, 25), 18, Theme.Orange)
