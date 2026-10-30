@@ -9,6 +9,7 @@ luau-analyze src/server/Services/RoundModel.luau src/server/Services/EconomyServ
 lune run tests/run.luau
 lune run tests/orders.luau
 lune run tests/recovery.luau
+lune run tests/rescue_client.luau
 lune run tests/monsters.luau
 lune run tests/vehicles.luau
 lune run tests/vehicle_client.luau

@@ -46,7 +46,7 @@ return table.freeze({
           <string name="Source"><![CDATA[--!strict
 -- 타이머와 보상은 서버에서도 같은 설정을 사용한다. 주문 3건의 제한과 고객별 조건도 중앙에서 관리한다.
 return table.freeze({
-	Build = "P6 괴물 등장 거리·출발선·도보 배달 제한 / Studio 재검증 대기",
+	Build = "P6 본인 구조 E 숨김 / Studio 재검증 대기",
 	Round = table.freeze({ Waiting = 20, Preparing = 10, Playing = 420, Results = 15, MaxPlayers = 4 }),
 	Lobby = table.freeze({ MinX = -38, MaxX = 38, MinZ = -176, MaxZ = -86 }),
 	Delivery = table.freeze({ Reward = 80, XP = 20, Distance = 12, Cooldown = 0.6 }),
@@ -2447,6 +2447,7 @@ local Names = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Rem
 local HUD = require(script.Parent.Controllers.HUDController)
 local hud = HUD.start()
 local stopSpawn = require(script.Parent.Controllers.SpawnController).start()
+local stopRescue = require(script.Parent.Controllers.RescueController).start()
 local folder = ReplicatedStorage:WaitForChild(Names.Folder, 30)
 if not folder then
 	hud.feedback("서버 초기화 실패 · Studio Output을 확인하세요")
@@ -2494,6 +2495,7 @@ script.Destroying:Connect(function()
 	settings.destroy()
 	hud.destroy()
 	stopSpawn()
+	stopRescue()
 end)
 print("[MidnightDelivery] Client GUI ready (P6)")
 ]]></string>
@@ -2938,6 +2940,49 @@ return Controller
           </Item>
           <Item class="ModuleScript" referent="49">
             <Properties>
+              <string name="Name">RescueController</string>
+              <string name="Source"><![CDATA[--!strict
+local Players = game:GetService("Players")
+local Controller = {}
+
+function Controller.start()
+	local player = Players.LocalPlayer
+	local descendantConnection: RBXScriptConnection? = nil
+	local hidden = setmetatable({}, {__mode = "k"})
+	local function release()
+		if descendantConnection then descendantConnection:Disconnect(); descendantConnection = nil end
+		for prompt, enabled in hidden do
+			if prompt.Parent then prompt.Enabled = enabled end
+		end
+		table.clear(hidden)
+	end
+	local function watch(character: Model)
+		release()
+		local function hide(instance: Instance)
+			-- 본인 캐릭터의 구조 프롬프트만 로컬에서 숨긴다. 팀원의 프롬프트/서버 권한 검사는 유지한다.
+			local attachment = instance.Parent
+			if instance:IsA("ProximityPrompt") and attachment and attachment:IsA("Attachment")
+				and attachment.Name == "MidnightRescue" and instance:IsDescendantOf(character) then
+				if hidden[instance] == nil then hidden[instance] = instance.Enabled end
+				instance.Enabled = false
+			end
+		end
+		descendantConnection = character.DescendantAdded:Connect(hide)
+		for _, instance in character:GetDescendants() do hide(instance) end
+	end
+	local added = player.CharacterAdded:Connect(watch)
+	local removing = player.CharacterRemoving:Connect(release)
+	if player.Character then watch(player.Character) end
+	return function()
+		added:Disconnect(); removing:Disconnect(); release()
+	end
+end
+return Controller
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="50">
+            <Properties>
               <string name="Name">SettingsController</string>
               <string name="Source"><![CDATA[--!strict
 local Players=game:GetService("Players")
@@ -3031,7 +3076,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="50">
+          <Item class="ModuleScript" referent="51">
             <Properties>
               <string name="Name">ShopController</string>
               <string name="Source"><![CDATA[--!strict
@@ -3119,7 +3164,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="51">
+          <Item class="ModuleScript" referent="52">
             <Properties>
               <string name="Name">SpawnController</string>
               <string name="Source"><![CDATA[--!strict
@@ -3156,7 +3201,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="52">
+          <Item class="ModuleScript" referent="53">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--!strict
@@ -3225,7 +3270,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="53">
+          <Item class="ModuleScript" referent="54">
             <Properties>
               <string name="Name">VehicleController</string>
               <string name="Source"><![CDATA[--!strict
@@ -3350,11 +3395,11 @@ return Controller
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="54">
+        <Item class="Folder" referent="55">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="55">
+          <Item class="ModuleScript" referent="56">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--!strict
@@ -3366,7 +3411,7 @@ return table.freeze({
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="56">
+          <Item class="ModuleScript" referent="57">
             <Properties>
               <string name="Name">UIFactory</string>
               <string name="Source"><![CDATA[--!strict
@@ -3443,7 +3488,7 @@ return Factory
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="57">
+  <Item class="Workspace" referent="58">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>
