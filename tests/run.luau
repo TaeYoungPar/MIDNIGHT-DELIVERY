@@ -133,7 +133,9 @@ test("distance, death, cooldown and missing character checks", function()
 	assert(not security:canDeliver(p, roblox.Vector3.zero, 12, 3.1, 0.75))
 	humanoid.Health = 0
 	assert(not security:canDeliver(p, roblox.Vector3.zero, 12, 4, 0.75))
-	humanoid.Health = 100; p.Character = nil
+	humanoid.Health = 100; humanoid.SeatPart = {}
+	assert(not security:canDeliver(p, roblox.Vector3.zero, 12, 4, 0.75), "any mounted seat must block delivery")
+	humanoid.SeatPart = nil; p.Character = nil
 	assert(not security:canDeliver(p, roblox.Vector3.zero, 12, 4, 0.75))
 end)
 test("teleport jump delays delivery and respawn requires fresh sample", function()

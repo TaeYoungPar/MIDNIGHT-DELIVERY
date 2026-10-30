@@ -125,6 +125,25 @@ for _, kind in { "Ghost", "Giant", "Fake" } do
 	actor.model:Destroy()
 end
 local second = builder.build()
+local boundary = loadModule(node("src/server/Services/LobbyBoundary")).new(second.world)
+boundary:setOpen(false)
+assert(#boundary.walls==4)
+for _,wall in boundary.walls do assert(wall.CanCollide and wall.CanQuery) end
+local lobbyRoot={Position=r.Vector3.new(0,5,-119)}
+local lobbyPlayer={Character={PivotTo=function(_,frame)lobbyRoot.Position=frame.Position end}}
+local resets,authorized=0,0
+local stateAccess={root=function()return lobbyRoot end}
+local vehicleAccess={reset=function(_,_,manual)assert(not manual);resets+=1 end}
+local function allow()authorized+=1 end
+assert(not boundary:enforce(lobbyPlayer,stateAccess,vehicleAccess,allow))
+lobbyRoot.Position=r.Vector3.new(80,5,-119)
+assert(boundary:enforce(lobbyPlayer,stateAccess,vehicleAccess,allow) and resets==1 and authorized==1)
+assert(lobbyRoot.Position.Z==-119 and lobbyRoot.AssemblyLinearVelocity==r.Vector3.zero)
+lobbyRoot.Position=r.Vector3.new(0,40,-119)
+assert(boundary:enforce(lobbyPlayer,stateAccess,vehicleAccess,allow),"jumping over the gate cannot bypass containment")
+boundary:setOpen(true)
+for _,wall in boundary.walls do assert(not wall.CanCollide and not wall.CanQuery and wall.Transparency==1) end
+boundary:destroy()
 assert(first.world.Parent == nil and second.world.Parent == workspace)
 assert(#second.world:GetDescendants() == count)
 assert(#workspace:GetChildren() == 1)

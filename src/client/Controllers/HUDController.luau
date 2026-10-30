@@ -32,7 +32,10 @@ function HUD.start()
 		if state.phase == "RESULTS" then
 			ui.title.Text = state.result
 			ui.hint.Text = string.format("성공 %d / 실패 %d · +%d Coins\n잠시 후 다음 배달을 준비합니다.", state.successes, state.failures, state.reward)
-		elseif not state.participant and state.phase ~= "WAITING" then
+		elseif state.phase == "WAITING" or state.phase == "PREPARING" then
+			ui.title.Text = if state.phase == "PREPARING" then "배달가방 준비 중" else "다음 배달 기다리는 중"
+			ui.hint.Text = "본부의 주황 출발선 안에서 기다리세요.\n배달이 시작되면 출발선이 열립니다."
+		elseif not state.participant then
 			ui.title.Text, ui.hint.Text = "로비 대기", Strings.Spectator
 		elseif state.phase == "PLAYING" or state.phase == "PREPARING" then
 			ui.title.Text, ui.hint.Text = state.orderTitle, state.orderHint
@@ -85,6 +88,13 @@ function HUD.start()
 			ui.phase.Text = string.format("배달 %d/3 · 성공 %d", state.orderIndex, state.successes)
 		end
 		local seconds = math.max(0, math.ceil(state.endsAt - now))
+		if state.phase == "RESULTS" then
+			ui.phase.Text = string.format("%d판 결과 · 다음 대기까지 %d초",state.roundId or 0,seconds)
+		elseif state.phase == "WAITING" then
+			ui.phase.Text = if state.endsAt == 0 then "참가자 준비를 기다리는 중" else string.format("다음 판 가방 준비까지 %d초",seconds)
+		elseif state.phase == "PREPARING" then
+			ui.phase.Text = string.format("%d판 · 출발선 개방까지 %d초",state.roundId or 0,seconds)
+		end
 		ui.timer.Text = if state.endsAt == 0 then "대기" else string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 		local camera = workspace.CurrentCamera

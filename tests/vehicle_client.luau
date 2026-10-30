@@ -38,6 +38,7 @@ local function setup(touch)
 		GetServerTimeNow=function()return 100 end,Raycast=function()return if hitDistance then {Distance=hitDistance}else nil end}
 	local run={RenderStepped=signal(),BindToRenderStep=function(_,name,priority,fn)bindings[name]={priority=priority,fn=fn}end,
 		UnbindFromRenderStep=function(_,name)bindings[name]=nil end}
+	local prompts={Enabled=true}
 	local typing=false
 	local uis={TouchEnabled=touch,InputEnded=signal(),WindowFocusReleased=signal(),WindowFocused=signal(),
 		GetFocusedTextBox=function()return if typing then{}else nil end,IsKeyDown=function()return false end}
@@ -45,6 +46,7 @@ local function setup(touch)
 		UnbindAction=function(_,name)actions[name]=nil end}
 	local game={GetService=function(_,name)
 		if name=="Players"then return{LocalPlayer=player}elseif name=="RunService"then return run
+		elseif name=="ProximityPromptService"then return prompts
 		elseif name=="UserInputService"then return uis elseif name=="ContextActionService"then return cas
 		else return{WaitForChild=function(self)return self end}end
 	end}
@@ -57,7 +59,7 @@ local function setup(touch)
 	controls.update({roundId=3,downUntil=0,vehicle={owned=true,resetAt=0},phase="WAITING",participant=false})
 	local controller=Camera.start()
 	return {made=made,requests=requests,bindings=bindings,actions=actions,humanoid=humanoid,character=character,seat=seat,
-		own=own,other=other,ownPrompt=ownPrompt,otherPrompt=otherPrompt,camera=camera,uis=uis,run=run,player=player,
+		prompts=prompts,own=own,other=other,ownPrompt=ownPrompt,otherPrompt=otherPrompt,camera=camera,uis=uis,run=run,player=player,
 		typing=function(value)typing=value end,hit=function(value)hitDistance=value end,
 		step=function(dt)run.RenderStepped:Fire(dt);for _,binding in bindings do binding.fn(dt)end end,
 		mount=function()humanoid.SeatPart=seat;humanoid.Sit=true;seat.Occupant=humanoid end,
@@ -81,7 +83,7 @@ for _,obj in f.made do if obj.ClassName=="TextLabel"and obj.Parent==ownTag then 
 assert(foundLabel)
 assert(f.camera.CameraType==r.Enum.CameraType.Custom,"on-foot camera must remain native")
 f.mount();f.step(0.2)
-assert(f.camera.CameraType==r.Enum.CameraType.Scriptable)
+assert(f.camera.CameraType==r.Enum.CameraType.Scriptable and not f.prompts.Enabled)
 local wanted=f.seat.Position-f.seat.CFrame.LookVector*16+r.Vector3.new(0,8,0)
 assert((f.camera.CFrame.Position-wanted).Magnitude<0.01,"camera must start above and behind scooter")
 assert(not ownHighlight.Enabled and not ownTag.Enabled and not f.ownPrompt.Enabled)
@@ -112,7 +114,7 @@ assert(button.Visible and button.Size.X.Offset==112 and button.Size.Y.Offset==56
 button.Activated:Fire();assert(f.requests[#f.requests].kind=="ExitVehicle")
 f.typing(true);assert(action.fn("exit",r.Enum.UserInputState.Begin)==r.Enum.ContextActionResult.Pass);f.typing(false)
 f.humanoid.SeatPart=nil;f.humanoid.Sit=false;f.seat.Occupant=nil;f.hit(nil);f.step(0.2)
-assert(f.camera.CameraType==r.Enum.CameraType.Custom and f.camera.CameraSubject==f.humanoid and not button.Visible)
+assert(f.camera.CameraType==r.Enum.CameraType.Custom and f.camera.CameraSubject==f.humanoid and not button.Visible and f.prompts.Enabled)
 assert(action.fn("exit",r.Enum.UserInputState.Begin)==r.Enum.ContextActionResult.Pass,"walking Space must remain jump")
 f.mount();f.step(0.2);f.humanoid.Health=0;f.step(0.2)
 assert(f.camera.CameraType==r.Enum.CameraType.Custom,"death must release chase camera")

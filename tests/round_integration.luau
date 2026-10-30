@@ -76,9 +76,13 @@ local monsterStub = {
 	status = function() return { kind = "", endsAt = 0, targetId = 0 } end,
 }
 local driveRequests = 0
+local riding = false
+local lobbyOpen, lobbyChecks = false, 0
+local confined={}
+local lobbyStub={setOpen=function(_,open)lobbyOpen=open end,enforce=function(_,player)lobbyChecks+=1;table.insert(confined,player.UserId)end,destroy=function()end}
 local vehicleStub = {
 	add = function() end, remove = function() end, exit = function() end, reset = function() return true end,
-	input = function() driveRequests += 1; return true end, destroy = function() end, seated = function() return false end,
+	input = function() driveRequests += 1; return true end, destroy = function() end, seated = function() return riding end,
 	status = function() return { owned = false, seated = false, speed = 0, resetAt = 0 } end,
 }
 local dataStub={
@@ -89,7 +93,7 @@ local dataStub={
 }
 local cosmeticStub={add=function()end,remove=function()end,apply=function()end,destroy=function()end}
 local shopStub={remove=function()end,action=function()return false,"test"end}
-local stop = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub, data=dataStub, cosmetics=cosmeticStub, shop=shopStub})
+local stop = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub, data=dataStub, cosmetics=cosmeticStub, shop=shopStub,lobby=lobbyStub})
 local function step(time)
 	clock = time; heartbeat:Fire(0.1)
 end
@@ -106,14 +110,20 @@ assert(driveRequests==1)
 remotes.Action.OnServerEvent:Fire(p,{kind="GiveCoins",roundId=0,coins=9999})
 assert(p:GetAttribute("Coins")==0,"unknown actions may not grant currency")
 step(0); step(20); assert(snapshots[1].phase == "PREPARING")
-step(30); assert(snapshots[1].phase == "PLAYING" and snapshots[1].orderIndex == 1)
+assert(not lobbyOpen and snapshots[1].target==nil and snapshots[1].orderTitle=="", "preparation must not disclose destinations")
+step(30); assert(lobbyOpen and lobbyChecks>0)
+assert(snapshots[1].phase == "PLAYING" and snapshots[1].orderIndex == 1)
 local spectator = makePlayer(2); table.insert(players, spectator); added:Fire(spectator)
 assert(not snapshots[2].participant)
+table.clear(confined)
 move("ghost_house"); step(35)
+assert(#confined==1 and confined[1]==spectator.UserId,"playing participants may depart, late spectators stay in the lobby")
 local function knocks()
 	local count=0;for _,event in feedbackEvents do if event.cue=="Knock"and event.player==p then count+=1 end end;return count
 end
 assert(knocks()==0)
+riding=true;trigger("ghost_house");assert(knocks()==0,"mounted knock must be rejected")
+riding=false
 trigger("ghost_house");assert(knocks()==1)
 trigger("ghost_house");assert(knocks()==1,"spam/rejected knocks must be silent")
 world.destinations.ghost_house.prompt.Triggered:Fire(spectator);assert(knocks()==1,"spectator cannot trigger a knock")
@@ -129,12 +139,16 @@ move("fake_1"); step(43); trigger("fake_1")
 assert(snapshots[1].phase == "RESULTS" and p:GetAttribute("Coins") == 360)
 assert(snapshots[1].successes == 3 and snapshots[1].reward == 360)
 trigger("fake_1"); assert(p:GetAttribute("Coins") == 360)
+step(44);assert(not lobbyOpen,"results must close the departure gate")
 step(58); assert(snapshots[1].phase == "WAITING")
-step(78); assert(snapshots[2].participant and snapshots[1].orderTitle:find("거인"))
-step(88); move("giant_house"); step(178)
+step(78); assert(snapshots[2].participant and snapshots[1].orderTitle=="")
+step(88);assert(snapshots[1].orderTitle:find("거인")); move("giant_house"); step(178)
 assert(snapshots[1].late and world.destinations.giant_house.prompt.HoldDuration == 3)
 assert(chaseKinds[1] == "Giant", "late giant must start a chase")
 trigger("giant_house"); assert(p:GetAttribute("Coins") == 360, "no forged short calming")
+riding=true;step(178.1);world.destinations.giant_house.prompt.PromptButtonHoldBegan:Fire(p)
+trigger("giant_house");assert(p:GetAttribute("Coins")==360 and snapshots[1].orderIndex==1,"riding must block giant interaction too")
+riding=false
 step(179); world.destinations.giant_house.prompt.PromptButtonHoldBegan:Fire(p)
 step(182.1); trigger("giant_house")
 assert(p:GetAttribute("Coins") == 416 and spectator:GetAttribute("Coins") == 56)
@@ -147,7 +161,7 @@ for _, dest in world.destinations do assert(not dest.prompt.Enabled) end
 assert(remotes.Snapshot.OnServerInvoke == nil)
 -- 별도 라운드에서 유령 규칙 위반과 가짜 집 오답도 실제 추격 연결을 호출해야 한다.
 clock = 500
-local stopAgain = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub, data=dataStub, cosmetics=cosmeticStub, shop=shopStub})
+local stopAgain = load(node("src/server/Services/RoundService")).start(world, remotes, {playerStates = stateStub, monsters = monsterStub, vehicles = vehicleStub, data=dataStub, cosmetics=cosmeticStub, shop=shopStub,lobby=lobbyStub})
 step(500); step(520); step(530)
 move("ghost_house"); step(535); trigger("ghost_house"); step(536); trigger("ghost_house"); step(537); trigger("ghost_house")
 p.root.CFrame = r.CFrame.identity; step(538)
@@ -159,7 +173,7 @@ assert(chaseKinds[#chaseKinds] == "Fake" and snapshots[1].stage == "COOLDOWN")
 stopAgain()
 -- 실제 서비스 신호 연결을 유지한 채 20라운드를 가속 시간으로 만료시킨다.
 clock=1000
-local stopSoak=load(node("src/server/Services/RoundService")).start(world,remotes,{playerStates=stateStub,monsters=monsterStub,vehicles=vehicleStub,data=dataStub,cosmetics=cosmeticStub,shop=shopStub})
+local stopSoak=load(node("src/server/Services/RoundService")).start(world,remotes,{playerStates=stateStub,monsters=monsterStub,vehicles=vehicleStub,data=dataStub,cosmetics=cosmeticStub,shop=shopStub,lobby=lobbyStub})
 step(clock)
 for round=1,20 do
 	step(clock+20);assert(snapshots[1].phase=="PREPARING")

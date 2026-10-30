@@ -3,9 +3,11 @@ local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Actions = game:GetService("ContextActionService")
+local Prompts = game:GetService("ProximityPromptService")
 local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
 local Controller = {}
 function Controller.start(remote: RemoteEvent,settings)
+	local promptsEnabled = Prompts.Enabled
 	local player = Players.LocalPlayer
 	local state: Types.Snapshot? = nil
 	local focused = true
@@ -89,6 +91,7 @@ function Controller.start(remote: RemoteEvent,settings)
 		elapsed = 0
 		local seat = ridingSeat()
 		local riding = seat ~= nil
+		Prompts.Enabled = promptsEnabled and not riding
 		local down = state and state.downUntil > workspace:GetServerTimeNow()
 		drive.Visible = UIS.TouchEnabled and riding and not down
 		leave.Visible, sprint.Visible = riding and not down, not riding and not down
@@ -120,6 +123,7 @@ function Controller.start(remote: RemoteEvent,settings)
 	return {
 		update = function(snapshot: Types.Snapshot) state = snapshot end,
 		destroy = function()
+			Prompts.Enabled = promptsEnabled
 			Actions:UnbindAction("MidnightExitVehicle")
 			for _, connection in connections do connection:Disconnect() end
 			reset:Destroy(); gui:Destroy()

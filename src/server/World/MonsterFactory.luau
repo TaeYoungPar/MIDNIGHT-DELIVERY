@@ -46,6 +46,17 @@ function Factory.create(parent: Instance, kind: string, position: Vector3)
 		end
 	end
 	model.Parent = parent
+	local highlight = Instance.new("Highlight")
+	highlight.Adornee, highlight.FillTransparency, highlight.OutlineColor = model, 1, color
+	highlight.DepthMode, highlight.Parent = Enum.HighlightDepthMode.Occluded, model
+	local tag = Instance.new("BillboardGui")
+	tag.Name, tag.Adornee, tag.Size = "MonsterName", root, UDim2.fromOffset(160,40)
+	tag.StudsOffsetWorldSpace, tag.MaxDistance, tag.AlwaysOnTop = Vector3.new(0,9,0), 120, false
+	local label = Instance.new("TextLabel")
+	label.Size, label.BackgroundTransparency = UDim2.fromScale(1,1), 1
+	label.Text = if giant then "배고픈 거인" elseif house then "가짜 집 괴물" else "유령"
+	label.TextColor3, label.TextStrokeTransparency, label.Font, label.TextSize = color, 0.3, Enum.Font.GothamBold, 22
+	label.Parent, tag.Parent = tag, model
 	return { model = model, root = root, humanoid = humanoid }
 end
 return Factory

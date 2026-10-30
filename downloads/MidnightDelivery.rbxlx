@@ -46,14 +46,15 @@ return table.freeze({
           <string name="Source"><![CDATA[--!strict
 -- 타이머와 보상은 서버에서도 같은 설정을 사용한다. 주문 3건의 제한과 고객별 조건도 중앙에서 관리한다.
 return table.freeze({
-	Build = "P6 안내판 통행·노크 소리·차량 이동 보완 / Studio 재검증 대기",
+	Build = "P6 괴물 등장 거리·출발선·도보 배달 제한 / Studio 재검증 대기",
 	Round = table.freeze({ Waiting = 20, Preparing = 10, Playing = 420, Results = 15, MaxPlayers = 4 }),
+	Lobby = table.freeze({ MinX = -38, MaxX = 38, MinZ = -176, MaxZ = -86 }),
 	Delivery = table.freeze({ Reward = 80, XP = 20, Distance = 12, Cooldown = 0.6 }),
 	Orders = table.freeze({ Duration = 120, GhostHold = 4, GhostCooldown = 10, GiantHot = 90, GiantCalm = 3, FakeLock = 10 }),
 	Vehicle = table.freeze({ ResetCooldown = 15, MaxSpeed = 38, RideHeight = 3, GroundResponse = 12, MaxStepHeight = 1 }),
 	Recovery = table.freeze({ DownTime = 12, Protection = 4, RescueHold = 3, RescueDistance = 8,
 		Checkpoints = { Vector3.new(0, 4, -105), Vector3.new(-105, 4, -20), Vector3.new(0, 4, 120), Vector3.new(20, 4, 230) } }),
-	Monster = table.freeze({ GhostDuration = 10, GiantDuration = 12, FakeDuration = 8, PathInterval = 1.5, CatchDistance = 4.5 }),
+	Monster = table.freeze({ GhostDuration = 10, GiantDuration = 12, FakeDuration = 8, PathInterval = 1.5, CatchDistance = 4.5, RevealTime = 1, SpawnDistance = 24 }),
 	Map = table.freeze({
 		Seed = 1028,
 		Size = 650,
@@ -462,6 +463,73 @@ return Economy
         </Item>
         <Item class="ModuleScript" referent="18">
           <Properties>
+            <string name="Name">LobbyBoundary</string>
+            <string name="Source"><![CDATA[--!strict
+local Config = require(game:GetService("ReplicatedStorage").Shared.Config)
+local Boundary = {}
+Boundary.__index = Boundary
+
+function Boundary.new(parent: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name, folder.Parent = "DepartureBoundary", parent
+	local walls, lines = {}, {}
+	local b = Config.Lobby
+	local width, depth = b.MaxX-b.MinX, b.MaxZ-b.MinZ
+	for _, side in {
+		{Vector3.new(width,30,1),Vector3.new(0,15,b.MinZ)},
+		{Vector3.new(width,30,1),Vector3.new(0,15,b.MaxZ)},
+		{Vector3.new(1,30,depth),Vector3.new(b.MinX,15,(b.MinZ+b.MaxZ)/2)},
+		{Vector3.new(1,30,depth),Vector3.new(b.MaxX,15,(b.MinZ+b.MaxZ)/2)},
+	} do
+		local wall = Instance.new("Part")
+		wall.Name, wall.Size, wall.Position = "DepartureGate", side[1], side[2]
+		wall.Anchored, wall.CanTouch, wall.Material = true, false, Enum.Material.ForceField
+		wall.Color, wall.Transparency, wall.Parent = Color3.fromRGB(255,170,69), 0.7, folder
+		table.insert(walls,wall)
+		local line = Instance.new("Part")
+		line.Name, line.Size = "DepartureLine", Vector3.new(side[1].X,0.15,side[1].Z)
+		line.Position = Vector3.new(side[2].X,0.4,side[2].Z)
+		line.Anchored, line.CanCollide, line.CanTouch, line.CanQuery = true, false, false, false
+		line.Material, line.Color, line.Parent = Enum.Material.Neon, wall.Color, folder
+		table.insert(lines,line)
+	end
+	local gui = Instance.new("SurfaceGui")
+	gui.Face, gui.Parent = Enum.NormalId.Front, walls[2]
+	local label = Instance.new("TextLabel")
+	label.Size, label.BackgroundTransparency = UDim2.fromScale(1,1), 1
+	label.Text, label.TextScaled, label.TextColor3 = "출발선 · 배달 시작 후 개방", true, Color3.fromRGB(255,230,180)
+	label.Parent = gui
+	return setmetatable({folder=folder,walls=walls,lines=lines,caption=gui},Boundary)
+end
+
+function Boundary.setOpen(self, open: boolean)
+	self.folder:SetAttribute("Open",open)
+	self.caption.Enabled = not open
+	for _, wall in self.walls do
+		wall.CanCollide, wall.CanQuery, wall.Transparency = not open, not open, if open then 1 else 0.7
+	end
+	for _, line in self.lines do line.Color = if open then Color3.fromRGB(99,216,184) else Color3.fromRGB(255,170,69) end
+end
+
+-- 도보/차량/점프/우회로 선을 넘더라도 서버에서 복귀시킨다. 클라이언트 벽 표시에 의존하지 않는다.
+function Boundary.enforce(self, player, states, vehicles, authorize): boolean
+	local root = states:root(player)
+	if not root or not player.Character then return false end
+	local p, b = root.Position, Config.Lobby
+	if p.X >= b.MinX+2 and p.X <= b.MaxX-2 and p.Z >= b.MinZ+2 and p.Z <= b.MaxZ-2 and p.Y >= -10 and p.Y <= 30 then return false end
+	vehicles:reset(player,false)
+	player.Character:PivotTo(CFrame.new(Config.Map.Spawn+Vector3.new(0,4,0))*CFrame.Angles(0,math.pi,0))
+	root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
+	authorize(player)
+	return true
+end
+function Boundary.destroy(self) self.folder:Destroy() end
+return Boundary
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="19">
+          <Properties>
             <string name="Name">MonsterService</string>
             <string name="Source"><![CDATA[--!strict
 local Pathfinding = game:GetService("PathfindingService")
@@ -471,7 +539,7 @@ local Service = {}
 Service.__index = Service
 type Actor = { model: Model, root: Part, humanoid: Humanoid }
 type Chase = { kind: string, target: Player, character: Model?, actor: Actor, endsAt: number,
-	nextPathAt: number, busy: boolean, waypoints: { PathWaypoint }, waypoint: number }
+	revealUntil: number, walkSpeed: number, nextPathAt: number, busy: boolean, waypoints: { PathWaypoint }, waypoint: number }
 type StateAccess = { canChase: (any, Player) -> boolean, root: (any, Player) -> (BasePart?, Humanoid?), down: (any, Player) -> boolean }
 type Store = { parent: Instance, states: StateAccess, changed: () -> (), active: Chase? }
 export type Runtime = typeof(setmetatable({} :: Store, Service))
@@ -494,15 +562,37 @@ function Service.start(self: Runtime, kind: string, target: Player?, origin: Vec
 	if not target or not self.states:canChase(target) then return end
 	self:stop()
 	local duration = if kind == "Ghost" then Config.Monster.GhostDuration elseif kind == "Giant" then Config.Monster.GiantDuration else Config.Monster.FakeDuration
-	local groundRay = RaycastParams.new()
-	groundRay.FilterType, groundRay.FilterDescendantsInstances = Enum.RaycastFilterType.Exclude, { self.parent, target.Character }
-	-- 현관 바깥에서 지면을 찾고 생성한다. 집 내부/지붕 위 스폰을 피한다.
-	local hit = workspace:Raycast(origin + Vector3.new(0, 25, 0), Vector3.new(0, -80, 0), groundRay)
-	local spawnPosition = if hit then hit.Position + Vector3.new(0, 7, 0) else origin + Vector3.new(0, 7, 0)
-	local actor = Factory.create(self.parent, kind, spawnPosition)
+	local targetRoot = self.states:root(target)
+	if not targetRoot then return end
+	local params, overlap = RaycastParams.new(), OverlapParams.new()
+	params.FilterType, params.FilterDescendantsInstances, params.RespectCanCollide = Enum.RaycastFilterType.Exclude, {self.parent,target.Character}, true
+	overlap.FilterType, overlap.FilterDescendantsInstances, overlap.RespectCanCollide = Enum.RaycastFilterType.Exclude, {self.parent,target.Character}, true
+	local look = targetRoot.CFrame.LookVector
+	local forward = Vector3.new(look.X,0,look.Z)
+	forward = if forward.Magnitude > 0.1 then forward.Unit else Vector3.new(0,0,-1)
+	local right = Vector3.new(-forward.Z,0,forward.X)
+	local spawnPosition = nil
+	-- 플레이어가 보는 방향부터 빈 지면을 찾는다. 집/벽 안이나 몸에 겹쳐서 생성하지 않는다.
+	for _, angle in {0,45,-45,90,-90,135,-135,180} do
+		local radians = math.rad(angle)
+		local point = targetRoot.Position + (forward*math.cos(radians)+right*math.sin(radians))*Config.Monster.SpawnDistance
+		local ground = workspace:Raycast(point+Vector3.new(0,12,0),Vector3.new(0,-60,0),params)
+		if not ground or ground.Normal.Y < 0.65 or math.abs(ground.Position.Y-targetRoot.Position.Y)>12 then continue end
+		local position = ground.Position+Vector3.new(0,7,0)
+		if #workspace:GetPartBoundsInBox(CFrame.new(position),Vector3.new(12,13,12),overlap)>0 then continue end
+		if workspace:Raycast(targetRoot.Position,position-targetRoot.Position,params) then continue end
+		spawnPosition = position;break
+	end
+	if not spawnPosition then warn("[MidnightDelivery] No clear monster reveal position");return end
+	local actor = Factory.create(self.parent,kind,spawnPosition)
+	actor.root.CFrame = CFrame.lookAt(spawnPosition,Vector3.new(targetRoot.Position.X,spawnPosition.Y,targetRoot.Position.Z))
 	actor.root:SetNetworkOwner(nil)
-	self.active = { kind = kind, target = target, character = target.Character, actor = actor,
-		endsAt = workspace:GetServerTimeNow() + duration, nextPathAt = 0, busy = false, waypoints = {}, waypoint = 1 }
+	local timestamp = workspace:GetServerTimeNow()
+	local walkSpeed = actor.humanoid.WalkSpeed
+	actor.humanoid.WalkSpeed = 0
+	self.active = {kind=kind,target=target,character=target.Character,actor=actor,
+		endsAt=timestamp+Config.Monster.RevealTime+duration,revealUntil=timestamp+Config.Monster.RevealTime,walkSpeed=walkSpeed,
+		nextPathAt=0,busy=false,waypoints={},waypoint=1}
 	self.changed()
 end
 function Service.tick(self: Runtime)
@@ -513,6 +603,9 @@ function Service.tick(self: Runtime)
 	if timestamp >= active.endsAt or active.target.Character ~= active.character or not self.states:canChase(active.target)
 		or not targetRoot or not active.actor.model.Parent or active.actor.humanoid.Health <= 0 or active.actor.root.Position.Y < -50 then self:stop(); return end
 	local actor = active.actor
+	-- 등장 유예 중에는 접근해도 즉시 기절시키지 않는다. 이후 원래 추격 속도로 복원한다.
+	if timestamp < active.revealUntil then return end
+	actor.humanoid.WalkSpeed = active.walkSpeed
 	local delta = targetRoot.Position - actor.root.Position
 	-- 서버 근접 판정 + 시야 검사. 벽 뒤 플레이어를 거리만으로 기절시키지 않는다.
 	if delta.Magnitude <= Config.Monster.CatchDistance then
@@ -558,7 +651,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">MovementModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -586,7 +679,7 @@ return Model
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">OrderModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -682,7 +775,7 @@ return Order
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">OrderPlanner</string>
             <string name="Source"><![CDATA[--!strict
@@ -703,7 +796,7 @@ return Planner
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">PlayerStateModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -743,7 +836,7 @@ return State
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">PlayerStateService</string>
             <string name="Source"><![CDATA[--!strict
@@ -940,7 +1033,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">ProfileModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -1060,7 +1153,7 @@ return Model
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">ProfileStore</string>
             <string name="Source"><![CDATA[--!strict
@@ -1140,7 +1233,7 @@ return Store
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">RoundModel</string>
             <string name="Source"><![CDATA[--!strict
@@ -1223,7 +1316,7 @@ return RoundModel
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">RoundService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1245,6 +1338,7 @@ local ActionLimiter = require(script.Parent.ActionLimiter)
 local Data = require(script.Parent.DataService)
 local Shop = require(script.Parent.ShopService)
 local Cosmetics = require(script.Parent.CosmeticService)
+local LobbyBoundary = require(script.Parent.LobbyBoundary)
 local RoundService = {}
 type Destination = { prompt: ProximityPrompt, target: Vector3, door: Part }
 type World = { world: Folder, spawn: SpawnLocation, destinations: { [string]: Destination }, fakeCenter: Vector3 }
@@ -1260,9 +1354,11 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local version, elapsed = 0, 0
 	local connections = {}
 	local holds: { [Player]: { index: number, destination: string, began: number } } = {}
+	local lobby = if dependencies and dependencies.lobby then dependencies.lobby else LobbyBoundary.new(world.world)
+	lobby:setOpen(false)
 	local function now() return workspace:GetServerTimeNow() end
 	local function snapshot(player: Player)
-		local spec = orders and orders:current()
+		local spec = if model.phase == "PLAYING" and model.participants[player.UserId] then orders and orders:current() else nil
 		local members = {}
 		for _, member in Players:GetPlayers() do
 			if model.participants[member.UserId] then
@@ -1358,6 +1454,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 			playerStates:clearRound()
 			if orders.successes == 3 then award(120, 4) end
 			model:finish(now(), string.format("배달 %d/3 성공 · %d건 실패", orders.successes, orders.failures))
+			print(string.format("[MidnightDelivery] Round %d: RESULTS; next wait in %ds",model.roundId,Config.Round.Results))
 		else
 			local nextOrder = orders:current()
 			if nextOrder then message ..= " · 다음 배달: " .. nextOrder.title end
@@ -1413,11 +1510,16 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	end
 	for id, destination in world.destinations do
 		table.insert(connections, destination.prompt.PromptButtonHoldBegan:Connect(function(player)
-			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or not playerStates:canAct(player) or not inRange(player, destination) then return end
+			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or not playerStates:canAct(player) or vehicles:seated(player) or not inRange(player, destination) then return end
 			holds[player] = { index = orders.index, destination = id, began = now() }
 		end))
 		table.insert(connections, destination.prompt.Triggered:Connect(function(player)
 			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or now() >= model.endsAt or not playerStates:canAct(player) then return end
+			if vehicles:seated(player) then
+				holds[player] = nil
+				remotes.Feedback:FireClient(player,"스쿠터에서 내린 뒤 문을 이용하세요")
+				return
+			end
 			local timestamp = now()
 			security:sample(player, timestamp, if vehicles:seated(player) then 46 else 28)
 			if not security:canDeliver(player, destination.target, Config.Delivery.Distance, timestamp, Config.Delivery.Cooldown) then return end
@@ -1445,6 +1547,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		if not orders or not orders.holder then return false end
 		local player = Players:GetPlayerByUserId(orders.holder)
 		if not player or not model.participants[player.UserId] or not playerStates:canAct(player) then return false end
+		if vehicles:seated(player) then return false end
 		local dest = world.destinations.ghost_house
 		if not inRange(player, dest) then return false end
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -1477,11 +1580,17 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		end
 		for player, hold in holds do
 			local dest = world.destinations[hold.destination]
-			if not orders or hold.index ~= orders.index or not dest or not playerStates:canAct(player) or not inRange(player, dest) then holds[player] = nil end
+			if not orders or hold.index ~= orders.index or not dest or not playerStates:canAct(player) or vehicles:seated(player) or not inRange(player, dest) then holds[player] = nil end
 		end
 		table.sort(ids)
 		local oldPhase = model.phase
+		-- PLAYING 전환 직전에도 선을 검사해 준비 시간 끝에 목적지에서 시작하는 것을 막는다.
+		for _, player in Players:GetPlayers() do
+			if not participant(player) then lobby:enforce(player,playerStates,vehicles,function(actor)security:authorizePosition(actor,timestamp)end) end
+		end
 		local changed = model:tick(timestamp, ids)
+		if oldPhase ~= model.phase then print(string.format("[MidnightDelivery] Round %d: %s -> %s; ready players=%d",model.roundId,oldPhase,model.phase,#ids)) end
+		lobby:setOpen(model.phase == "PLAYING")
 		if model.phase ~= "PLAYING" and oldPhase == "PLAYING" then monsters:stop(); playerStates:clearRound() end
 		if model.phase == "PREPARING" and oldPhase == "WAITING" then
 			orders = OrderModel.new(Config.Orders, Planner.create(model.roundId, Catalog.FakeHouses))
@@ -1515,6 +1624,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	end))
 	publish()
 	return function()
+		lobby:destroy()
 		for _, connection in connections do connection:Disconnect() end
 		cosmetics:destroy()
 		vehicles:destroy()
@@ -1529,7 +1639,7 @@ return RoundService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">SecurityService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1599,7 +1709,7 @@ function Security.canDeliver(self: Service, player: Player, target: Vector3, max
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then return false end
+	if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 or humanoid.SeatPart ~= nil then return false end
 	local distance = (root.Position - target).Magnitude
 	if distance ~= distance or distance > maxDistance then return false end
 	if now - (self.interactions[player] or -math.huge) < cooldown then return false end
@@ -1611,7 +1721,7 @@ return Security
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">ShopService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1643,7 +1753,7 @@ return Service
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1898,11 +2008,11 @@ return Service
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="31">
+      <Item class="Folder" referent="32">
         <Properties>
           <string name="Name">World</string>
         </Properties>
-        <Item class="ModuleScript" referent="32">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">BuildingFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1961,7 +2071,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">DecorationFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -1998,7 +2108,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">MonsterFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -2049,13 +2159,24 @@ function Factory.create(parent: Instance, kind: string, position: Vector3)
 		end
 	end
 	model.Parent = parent
+	local highlight = Instance.new("Highlight")
+	highlight.Adornee, highlight.FillTransparency, highlight.OutlineColor = model, 1, color
+	highlight.DepthMode, highlight.Parent = Enum.HighlightDepthMode.Occluded, model
+	local tag = Instance.new("BillboardGui")
+	tag.Name, tag.Adornee, tag.Size = "MonsterName", root, UDim2.fromOffset(160,40)
+	tag.StudsOffsetWorldSpace, tag.MaxDistance, tag.AlwaysOnTop = Vector3.new(0,9,0), 120, false
+	local label = Instance.new("TextLabel")
+	label.Size, label.BackgroundTransparency = UDim2.fromScale(1,1), 1
+	label.Text = if giant then "배고픈 거인" elseif house then "가짜 집 괴물" else "유령"
+	label.TextColor3, label.TextStrokeTransparency, label.Font, label.TextSize = color, 0.3, Enum.Font.GothamBold, 22
+	label.Parent, tag.Parent = tag, model
 	return { model = model, root = root, humanoid = humanoid }
 end
 return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">NavigationSigns</string>
             <string name="Source"><![CDATA[--!strict
@@ -2087,7 +2208,7 @@ return Navigation
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">Primitives</string>
             <string name="Source"><![CDATA[--!strict
@@ -2127,7 +2248,7 @@ return Primitives
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">VehicleFactory</string>
             <string name="Source"><![CDATA[--!strict
@@ -2179,7 +2300,7 @@ return Factory
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">WorldBuilder</string>
             <string name="Source"><![CDATA[--!strict
@@ -2299,25 +2420,25 @@ return WorldBuilder
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="39">
+  <Item class="SoundService" referent="40">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="40">
+  <Item class="StarterPlayer" referent="41">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="41">
+    <Item class="StarterPlayerScripts" referent="42">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="42">
+      <Item class="Folder" referent="43">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="43">
+        <Item class="LocalScript" referent="44">
           <Properties>
             <string name="Name">Bootstrap</string>
             <string name="Source"><![CDATA[--!strict
@@ -2378,11 +2499,11 @@ print("[MidnightDelivery] Client GUI ready (P6)")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="44">
+        <Item class="Folder" referent="45">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="45">
+          <Item class="ModuleScript" referent="46">
             <Properties>
               <string name="Name">AudioController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2517,7 +2638,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="46">
+          <Item class="ModuleScript" referent="47">
             <Properties>
               <string name="Name">HUDController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2554,7 +2675,10 @@ function HUD.start()
 		if state.phase == "RESULTS" then
 			ui.title.Text = state.result
 			ui.hint.Text = string.format("성공 %d / 실패 %d · +%d Coins\n잠시 후 다음 배달을 준비합니다.", state.successes, state.failures, state.reward)
-		elseif not state.participant and state.phase ~= "WAITING" then
+		elseif state.phase == "WAITING" or state.phase == "PREPARING" then
+			ui.title.Text = if state.phase == "PREPARING" then "배달가방 준비 중" else "다음 배달 기다리는 중"
+			ui.hint.Text = "본부의 주황 출발선 안에서 기다리세요.\n배달이 시작되면 출발선이 열립니다."
+		elseif not state.participant then
 			ui.title.Text, ui.hint.Text = "로비 대기", Strings.Spectator
 		elseif state.phase == "PLAYING" or state.phase == "PREPARING" then
 			ui.title.Text, ui.hint.Text = state.orderTitle, state.orderHint
@@ -2607,6 +2731,13 @@ function HUD.start()
 			ui.phase.Text = string.format("배달 %d/3 · 성공 %d", state.orderIndex, state.successes)
 		end
 		local seconds = math.max(0, math.ceil(state.endsAt - now))
+		if state.phase == "RESULTS" then
+			ui.phase.Text = string.format("%d판 결과 · 다음 대기까지 %d초",state.roundId or 0,seconds)
+		elseif state.phase == "WAITING" then
+			ui.phase.Text = if state.endsAt == 0 then "참가자 준비를 기다리는 중" else string.format("다음 판 가방 준비까지 %d초",seconds)
+		elseif state.phase == "PREPARING" then
+			ui.phase.Text = string.format("%d판 · 출발선 개방까지 %d초",state.roundId or 0,seconds)
+		end
 		ui.timer.Text = if state.endsAt == 0 then "대기" else string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 		local camera = workspace.CurrentCamera
@@ -2666,7 +2797,7 @@ return HUD
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="47">
+          <Item class="ModuleScript" referent="48">
             <Properties>
               <string name="Name">InputController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2674,9 +2805,11 @@ local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Actions = game:GetService("ContextActionService")
+local Prompts = game:GetService("ProximityPromptService")
 local Types = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Types"))
 local Controller = {}
 function Controller.start(remote: RemoteEvent,settings)
+	local promptsEnabled = Prompts.Enabled
 	local player = Players.LocalPlayer
 	local state: Types.Snapshot? = nil
 	local focused = true
@@ -2760,6 +2893,7 @@ function Controller.start(remote: RemoteEvent,settings)
 		elapsed = 0
 		local seat = ridingSeat()
 		local riding = seat ~= nil
+		Prompts.Enabled = promptsEnabled and not riding
 		local down = state and state.downUntil > workspace:GetServerTimeNow()
 		drive.Visible = UIS.TouchEnabled and riding and not down
 		leave.Visible, sprint.Visible = riding and not down, not riding and not down
@@ -2791,6 +2925,7 @@ function Controller.start(remote: RemoteEvent,settings)
 	return {
 		update = function(snapshot: Types.Snapshot) state = snapshot end,
 		destroy = function()
+			Prompts.Enabled = promptsEnabled
 			Actions:UnbindAction("MidnightExitVehicle")
 			for _, connection in connections do connection:Disconnect() end
 			reset:Destroy(); gui:Destroy()
@@ -2801,7 +2936,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="48">
+          <Item class="ModuleScript" referent="49">
             <Properties>
               <string name="Name">SettingsController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2896,7 +3031,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="49">
+          <Item class="ModuleScript" referent="50">
             <Properties>
               <string name="Name">ShopController</string>
               <string name="Source"><![CDATA[--!strict
@@ -2984,7 +3119,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="50">
+          <Item class="ModuleScript" referent="51">
             <Properties>
               <string name="Name">SpawnController</string>
               <string name="Source"><![CDATA[--!strict
@@ -3021,7 +3156,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="51">
+          <Item class="ModuleScript" referent="52">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--!strict
@@ -3090,7 +3225,7 @@ return Controller
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="52">
+          <Item class="ModuleScript" referent="53">
             <Properties>
               <string name="Name">VehicleController</string>
               <string name="Source"><![CDATA[--!strict
@@ -3215,11 +3350,11 @@ return Controller
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="53">
+        <Item class="Folder" referent="54">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="54">
+          <Item class="ModuleScript" referent="55">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--!strict
@@ -3231,7 +3366,7 @@ return table.freeze({
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="55">
+          <Item class="ModuleScript" referent="56">
             <Properties>
               <string name="Name">UIFactory</string>
               <string name="Source"><![CDATA[--!strict
@@ -3308,7 +3443,7 @@ return Factory
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="56">
+  <Item class="Workspace" referent="57">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

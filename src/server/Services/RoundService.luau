@@ -17,6 +17,7 @@ local ActionLimiter = require(script.Parent.ActionLimiter)
 local Data = require(script.Parent.DataService)
 local Shop = require(script.Parent.ShopService)
 local Cosmetics = require(script.Parent.CosmeticService)
+local LobbyBoundary = require(script.Parent.LobbyBoundary)
 local RoundService = {}
 type Destination = { prompt: ProximityPrompt, target: Vector3, door: Part }
 type World = { world: Folder, spawn: SpawnLocation, destinations: { [string]: Destination }, fakeCenter: Vector3 }
@@ -32,9 +33,11 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	local version, elapsed = 0, 0
 	local connections = {}
 	local holds: { [Player]: { index: number, destination: string, began: number } } = {}
+	local lobby = if dependencies and dependencies.lobby then dependencies.lobby else LobbyBoundary.new(world.world)
+	lobby:setOpen(false)
 	local function now() return workspace:GetServerTimeNow() end
 	local function snapshot(player: Player)
-		local spec = orders and orders:current()
+		local spec = if model.phase == "PLAYING" and model.participants[player.UserId] then orders and orders:current() else nil
 		local members = {}
 		for _, member in Players:GetPlayers() do
 			if model.participants[member.UserId] then
@@ -130,6 +133,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 			playerStates:clearRound()
 			if orders.successes == 3 then award(120, 4) end
 			model:finish(now(), string.format("배달 %d/3 성공 · %d건 실패", orders.successes, orders.failures))
+			print(string.format("[MidnightDelivery] Round %d: RESULTS; next wait in %ds",model.roundId,Config.Round.Results))
 		else
 			local nextOrder = orders:current()
 			if nextOrder then message ..= " · 다음 배달: " .. nextOrder.title end
@@ -185,11 +189,16 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	end
 	for id, destination in world.destinations do
 		table.insert(connections, destination.prompt.PromptButtonHoldBegan:Connect(function(player)
-			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or not playerStates:canAct(player) or not inRange(player, destination) then return end
+			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or not playerStates:canAct(player) or vehicles:seated(player) or not inRange(player, destination) then return end
 			holds[player] = { index = orders.index, destination = id, began = now() }
 		end))
 		table.insert(connections, destination.prompt.Triggered:Connect(function(player)
 			if not orders or model.phase ~= "PLAYING" or not model.participants[player.UserId] or now() >= model.endsAt or not playerStates:canAct(player) then return end
+			if vehicles:seated(player) then
+				holds[player] = nil
+				remotes.Feedback:FireClient(player,"스쿠터에서 내린 뒤 문을 이용하세요")
+				return
+			end
 			local timestamp = now()
 			security:sample(player, timestamp, if vehicles:seated(player) then 46 else 28)
 			if not security:canDeliver(player, destination.target, Config.Delivery.Distance, timestamp, Config.Delivery.Cooldown) then return end
@@ -217,6 +226,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		if not orders or not orders.holder then return false end
 		local player = Players:GetPlayerByUserId(orders.holder)
 		if not player or not model.participants[player.UserId] or not playerStates:canAct(player) then return false end
+		if vehicles:seated(player) then return false end
 		local dest = world.destinations.ghost_house
 		if not inRange(player, dest) then return false end
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -249,11 +259,17 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 		end
 		for player, hold in holds do
 			local dest = world.destinations[hold.destination]
-			if not orders or hold.index ~= orders.index or not dest or not playerStates:canAct(player) or not inRange(player, dest) then holds[player] = nil end
+			if not orders or hold.index ~= orders.index or not dest or not playerStates:canAct(player) or vehicles:seated(player) or not inRange(player, dest) then holds[player] = nil end
 		end
 		table.sort(ids)
 		local oldPhase = model.phase
+		-- PLAYING 전환 직전에도 선을 검사해 준비 시간 끝에 목적지에서 시작하는 것을 막는다.
+		for _, player in Players:GetPlayers() do
+			if not participant(player) then lobby:enforce(player,playerStates,vehicles,function(actor)security:authorizePosition(actor,timestamp)end) end
+		end
 		local changed = model:tick(timestamp, ids)
+		if oldPhase ~= model.phase then print(string.format("[MidnightDelivery] Round %d: %s -> %s; ready players=%d",model.roundId,oldPhase,model.phase,#ids)) end
+		lobby:setOpen(model.phase == "PLAYING")
 		if model.phase ~= "PLAYING" and oldPhase == "PLAYING" then monsters:stop(); playerStates:clearRound() end
 		if model.phase == "PREPARING" and oldPhase == "WAITING" then
 			orders = OrderModel.new(Config.Orders, Planner.create(model.roundId, Catalog.FakeHouses))
@@ -287,6 +303,7 @@ function RoundService.start(world: World, remotes: Remotes, dependencies: any?)
 	end))
 	publish()
 	return function()
+		lobby:destroy()
 		for _, connection in connections do connection:Disconnect() end
 		cosmetics:destroy()
 		vehicles:destroy()

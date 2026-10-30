@@ -65,7 +65,7 @@ function Security.canDeliver(self: Service, player: Player, target: Vector3, max
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then return false end
+	if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 or humanoid.SeatPart ~= nil then return false end
 	local distance = (root.Position - target).Magnitude
 	if distance ~= distance or distance > maxDistance then return false end
 	if now - (self.interactions[player] or -math.huge) < cooldown then return false end
